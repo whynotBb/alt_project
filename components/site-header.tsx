@@ -1,0 +1,54 @@
+import Link from "next/link";
+import { FileSpreadsheet, LayoutDashboard, Shield, Upload } from "lucide-react";
+import { auth } from "@/auth";
+import { ShortcutSpecialCharMenu } from "@/components/shortcut-special-char-menu";
+import { SignOutButton } from "@/components/sign-out-button";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { cn } from "@/lib/utils";
+
+const links = [
+	{ href: "/", label: "파일 검수", icon: Upload },
+	{ href: "/admin/ip-allowlist", label: "IP 관리", icon: Shield },
+	{ href: "/admin/audit-logs", label: "활동 로그", icon: LayoutDashboard },
+] as const;
+
+export async function SiteHeader() {
+	const session = await auth();
+
+	return (
+		<header className="sticky top-0 z-40 border-b border-border/80 bg-card/90 backdrop-blur-md">
+			<div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+				<Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-foreground">
+					<span className="flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary">
+						<FileSpreadsheet className="size-5" aria-hidden />
+					</span>
+					<span className="leading-tight">
+						Alt Inspector
+						<span className="hidden text-[11px] font-normal text-muted-foreground sm:block">이미지 접근성 검수</span>
+					</span>
+				</Link>
+				<div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
+					<nav aria-label="주요 메뉴" className="flex flex-wrap gap-0.5 sm:gap-1">
+						{links.map(({ href, label, icon: Icon }) => (
+							<Link key={href} href={href} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:px-3">
+								<Icon className="size-4 shrink-0 opacity-80" aria-hidden />
+								<span className="hidden sm:inline">{label}</span>
+							</Link>
+						))}
+						<ShortcutSpecialCharMenu />
+					</nav>
+					<div className="mx-0.5 hidden h-6 w-px bg-border sm:block" aria-hidden />
+					<ThemeToggle />
+					{session?.user ? (
+						<SignOutButton />
+					) : (
+						<Link href="/login" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 no-underline")}>
+							로그인
+						</Link>
+					)}
+				</div>
+			</div>
+		</header>
+	);
+}
