@@ -1,10 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Ban, Check, Copy, FileCode2, FolderOutput, Loader2, RefreshCw, SpellCheck2, Trash2, Upload, Wand2 } from "lucide-react";
+import { ArrowRight, Ban, Check, ChevronDown, Copy, FileCode2, FolderOutput, Loader2, RefreshCw, SpellCheck2, Trash2, Upload, Wand2 } from "lucide-react";
 import JSZip from "jszip";
 import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { extractZipAssets, isZipFile, zipArchiveLabel } from "@/lib/client/extract-zip-assets";
@@ -16,6 +23,16 @@ import { getExistingAltFromHtmlForImage } from "@/lib/client/existing-alt-from-h
 import { injectReviewedAltsIntoHtmlMarkup } from "@/lib/client/html-alt-inject-from-review";
 import { appendAltReviewExcelToJsZip, downloadAltReviewExcelFile } from "@/lib/client/append-alt-review-excel-to-zip";
 import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
+import { ImageViewerZoom } from "@/components/image-viewer-zoom";
+
+const OCR_ENGINE_OPTIONS: { value: OcrEngineId; label: string }[] = [
+	{ value: "tesseract", label: "Tesseract" },
+	{ value: "google-vision", label: "구글 비전" },
+];
+
+function ocrEngineLabel(id: OcrEngineId): string {
+	return OCR_ENGINE_OPTIONS.find((o) => o.value === id)?.label ?? id;
+}
 
 const MAX_IMAGES = 200;
 const LIST_ITEM_HEIGHT = 52;
@@ -692,13 +709,38 @@ export function ImageReviewWorkspace() {
 								<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">왼쪽 목록에서 파일을 추가한 뒤, 추출 텍스트와 최종 ALT를 편집·승인합니다.</p>
 							</div>
 							<div className="flex shrink-0 flex-col gap-1 sm:items-end">
-								<Label htmlFor="ocr-engine" className="text-[10px] font-medium text-muted-foreground">
+								<Label id="ocr-engine-label" className="text-[10px] font-medium text-muted-foreground">
 									텍스트 추출 엔진
 								</Label>
-								<select id="ocr-engine" className={cn("h-8 min-w-42 rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground shadow-sm", "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", "disabled:cursor-not-allowed disabled:opacity-50")} value={ocrEngine} disabled={ocrLoading || isParsingZip} onChange={(e) => setOcrEngine(e.target.value as OcrEngineId)} aria-label="텍스트 추출 엔진">
-									<option value="tesseract">Tesseract</option>
-									<option value="google-vision">구글 비전</option>
-								</select>
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										type="button"
+										disabled={ocrLoading || isParsingZip}
+										aria-labelledby="ocr-engine-label"
+										className={cn(
+											buttonVariants({ variant: "outline", size: "default" }),
+											"h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm",
+											"data-disabled:pointer-events-none data-disabled:opacity-50",
+										)}
+									>
+										<span className="min-w-0 truncate">{ocrEngineLabel(ocrEngine)}</span>
+										<ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end" className="min-w-42">
+										<DropdownMenuRadioGroup
+											value={ocrEngine}
+											onValueChange={(v) => {
+												if (v === "tesseract" || v === "google-vision") setOcrEngine(v);
+											}}
+										>
+											{OCR_ENGINE_OPTIONS.map((opt) => (
+												<DropdownMenuRadioItem key={opt.value} value={opt.value} closeOnClick className="text-xs">
+													{opt.label}
+												</DropdownMenuRadioItem>
+											))}
+										</DropdownMenuRadioGroup>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							</div>
 						</div>
 					</header>
@@ -707,12 +749,11 @@ export function ImageReviewWorkspace() {
 						<div className="grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
 							<div className="flex min-h-[200px] flex-col lg:min-h-0">
 								<div className="border-b border-border/80 bg-muted/30 px-3 py-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
-								<div className="flex min-h-0 flex-1 items-center justify-center p-4">
+								<div className="flex min-h-0 flex-1 flex-col p-4">
 									{selected ? (
-										// eslint-disable-next-line @next/next/no-img-element
-										<img src={selected.url} alt={selected.name} className="max-h-full max-w-full rounded-lg object-contain shadow-md ring-1 ring-black/5" />
+										<ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} />
 									) : (
-										<p className="max-w-xs text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>
+										<p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>
 									)}
 								</div>
 							</div>
