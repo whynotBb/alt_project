@@ -1,19 +1,5 @@
-import path from "node:path";
-import { createRequire } from "node:module";
 import { createWorker } from "tesseract.js";
-
-/**
- * worker_threads는 반드시 `worker-script/node/index.js`를 실행해야 한다.
- * `worker/node/index.js`는 spawn 헬퍼만 export 하며, 그걸 넘기면 내부가 잘못된 경로를 require 한다.
- * 번들된 __dirname 대신 node_modules 실제 경로를 넘긴다.
- */
-function getTesseractWorkerOptions() {
-	const require = createRequire(path.join(process.cwd(), "package.json"));
-	const pkgRoot = path.dirname(require.resolve("tesseract.js/package.json"));
-	return {
-		workerPath: path.join(pkgRoot, "src", "worker-script", "node", "index.js"),
-	};
-}
+import { getTesseractWorkerOptions } from "@/lib/pipeline/tesseract-worker-options";
 
 /**
  * 로컬 Tesseract로 이미지에서 텍스트를 추출합니다 (외부 API 없음).
