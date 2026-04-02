@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { MAX_ZIP_BYTES } from "@/lib/pipeline/run-zip-job";
 import { createZipProcessJob } from "@/lib/zip-process-job-store";
 import type { ProcessZipResult } from "@/types/process-zip";
@@ -58,7 +58,7 @@ export async function POST(request: Request): Promise<NextResponse<ProcessZipRes
     );
   }
 
-  const jobId = createZipProcessJob(buffer, file.name);
+  const jobId = createZipProcessJob(buffer, file.name, (task) => after(task));
   console.info("[upload-zip] job queued", { jobId, bytes: buffer.length });
   return NextResponse.json({ ok: true, jobId }, { status: 202 });
 }

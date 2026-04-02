@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
+import { createRequire } from "node:module";
+import path from "node:path";
+
+const requireFromRoot = createRequire(path.join(process.cwd(), "package.json"));
+const tesseractJsVersion = (requireFromRoot("tesseract.js/package.json") as { version: string }).version;
+const tesseractCoreVersion = (requireFromRoot("tesseract.js-core/package.json") as { version: string }).version;
 
 const nextConfig: NextConfig = {
+	env: {
+		NEXT_PUBLIC_TESSERACT_JS_VERSION: tesseractJsVersion,
+		NEXT_PUBLIC_TESSERACT_CORE_VERSION: tesseractCoreVersion,
+	},
 	/** Keep tesseract on real disk paths so worker_threads see a valid worker script. */
 	serverExternalPackages: ["tesseract.js", "tesseract.js-core", "sharp", "hanspell"],
 	/**

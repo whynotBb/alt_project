@@ -20,6 +20,18 @@ export async function requestOcrForImageItem(
   try {
     const blobRes = await fetch(item.url);
     const blob = await blobRes.blob();
+
+    if (engine === "tesseract") {
+      try {
+        const { ocrRasterImageBlobWithTesseract } = await import("@/lib/client/tesseract-browser-ocr");
+        const text = await ocrRasterImageBlobWithTesseract(blob);
+        return { ok: true, text };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Tesseract OCR에 실패했습니다.";
+        return { ok: false, message: msg };
+      }
+    }
+
     const fileName = item.name.split("/").pop() ?? "image.png";
     const fd = new FormData();
     fd.append("file", blob, fileName);

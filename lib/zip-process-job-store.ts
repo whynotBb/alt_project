@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import { runZipProcessing } from "@/lib/pipeline/run-zip-job";
 import type { ProcessZipResult } from "@/types/process-zip";
 
+/** Vercel 등: 응답 후에도 백그라운드 작업이 끝날 때까지 인보케이션을 유지하려면 `after`로 등록 */
+export type ScheduleBackground = (task: () => Promise<void>) => void;
+
 type JobRecord = {
 	status: "pending" | "processing" | "complete";
 	result?: ProcessZipResult;
@@ -14,12 +17,12 @@ export type ZipJobPollResponse =
 	| { status: "pending" | "processing" }
 	| { status: "complete"; result: ProcessZipResult };
 
-export function createZipProcessJob(buffer: Buffer, fileName: string): string {
+export function createZipProcessJob(buffer: Buffer, fileName: string, scheduleBackground: ScheduleBackground): string {
 	const id = randomUUID();
 	const rec: JobRecord = { status: "pending" };
 	jobs.set(id, rec);
 
-	void (async () => {
+	scheduleBackground(async () => {
 		rec.status = "processing";
 		try {
 			rec.result = await runZipProcessing(buffer, fileName);
@@ -31,7 +34,7 @@ export function createZipProcessJob(buffer: Buffer, fileName: string): string {
 		} finally {
 			rec.status = "complete";
 		}
-	})();
+	});
 
 	return id;
 }
