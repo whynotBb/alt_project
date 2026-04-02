@@ -18,7 +18,7 @@ function readTheme(): boolean {
 	const saved = window.localStorage.getItem(STORAGE_KEY);
 	if (saved === "dark") return true;
 	if (saved === "light") return false;
-	return window.matchMedia("(prefers-color-scheme: dark)").matches;
+	return window.matchMedia("(prefers-color-scheme: light)").matches;
 }
 
 function applyDark(dark: boolean) {
@@ -60,14 +60,7 @@ export function ThemeToggle() {
 	}, []);
 
 	return (
-		<Button
-			type="button"
-			variant="ghost"
-			size="icon-sm"
-			className="text-muted-foreground"
-			aria-label={dark ? "라이트 모드로 전환" : "다크 모드로 전환"}
-			onClick={toggle}
-		>
+		<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label={dark ? "라이트 모드로 전환" : "다크 모드로 전환"} onClick={toggle}>
 			{dark ? <Sun className="size-4" aria-hidden /> : <Moon className="size-4" aria-hidden />}
 		</Button>
 	);
