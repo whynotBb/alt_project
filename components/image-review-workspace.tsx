@@ -5,13 +5,7 @@ import { ArrowRight, Ban, Check, ChevronDown, Copy, FileCode2, FolderOutput, Loa
 import JSZip from "jszip";
 import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { extractZipAssets, isZipFile, zipArchiveLabel } from "@/lib/client/extract-zip-assets";
@@ -26,8 +20,9 @@ import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-p
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
 
 const OCR_ENGINE_OPTIONS: { value: OcrEngineId; label: string }[] = [
-	{ value: "tesseract", label: "Tesseract" },
+	{ value: "ocr-space", label: "OCR.space" },
 	{ value: "google-vision", label: "구글 비전" },
+	{ value: "tesseract", label: "Tesseract(로컬전용)" },
 ];
 
 function ocrEngineLabel(id: OcrEngineId): string {
@@ -114,7 +109,7 @@ export function ImageReviewWorkspace() {
 	const [spellBaseline, setSpellBaseline] = useState<string | null>(null);
 	const [exportLoading, setExportLoading] = useState(false);
 	const [imageReviewEnabled, setImageReviewEnabled] = useState(true);
-	const [ocrEngine, setOcrEngine] = useState<OcrEngineId>("tesseract");
+	const [ocrEngine, setOcrEngine] = useState<OcrEngineId>("ocr-space");
 	const [spellPreviewHeightPx, setSpellPreviewHeightPx] = useState(SPELL_PREVIEW_DEFAULT_H);
 	const spellPreviewResizeRef = useRef<{ pointerId: number; startY: number; startH: number } | null>(null);
 
@@ -713,16 +708,7 @@ export function ImageReviewWorkspace() {
 									텍스트 추출 엔진
 								</Label>
 								<DropdownMenu>
-									<DropdownMenuTrigger
-										type="button"
-										disabled={ocrLoading || isParsingZip}
-										aria-labelledby="ocr-engine-label"
-										className={cn(
-											buttonVariants({ variant: "outline", size: "default" }),
-											"h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm",
-											"data-disabled:pointer-events-none data-disabled:opacity-50",
-										)}
-									>
+									<DropdownMenuTrigger type="button" disabled={ocrLoading || isParsingZip} aria-labelledby="ocr-engine-label" className={cn(buttonVariants({ variant: "outline", size: "default" }), "h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm", "data-disabled:pointer-events-none data-disabled:opacity-50")}>
 										<span className="min-w-0 truncate">{ocrEngineLabel(ocrEngine)}</span>
 										<ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
 									</DropdownMenuTrigger>
@@ -730,7 +716,7 @@ export function ImageReviewWorkspace() {
 										<DropdownMenuRadioGroup
 											value={ocrEngine}
 											onValueChange={(v) => {
-												if (v === "tesseract" || v === "google-vision") setOcrEngine(v);
+												if (v === "tesseract" || v === "google-vision" || v === "ocr-space") setOcrEngine(v);
 											}}
 										>
 											{OCR_ENGINE_OPTIONS.map((opt) => (
@@ -749,13 +735,7 @@ export function ImageReviewWorkspace() {
 						<div className="grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
 							<div className="flex min-h-[200px] flex-col lg:min-h-0">
 								<div className="border-b border-border/80 bg-muted/30 px-3 py-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
-								<div className="flex min-h-0 flex-1 flex-col p-4">
-									{selected ? (
-										<ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} />
-									) : (
-										<p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>
-									)}
-								</div>
+								<div className="flex min-h-0 flex-1 flex-col p-4">{selected ? <ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} /> : <p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>}</div>
 							</div>
 							<div className="flex min-h-[200px] flex-col lg:min-h-0">
 								<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
@@ -816,7 +796,7 @@ export function ImageReviewWorkspace() {
 										updateSelectedText(v);
 									}}
 									disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-									placeholder={!selected ? "이미지를 선택하세요." : selected?.excludedFromTarget ? "대상에서 제외된 이미지입니다. alt 주입·검수 대상에 포함되지 않습니다." : ocrLoading ? (ocrEngine === "google-vision" ? "Google Cloud Vision으로 텍스트 추출 중…" : "Tesseract OCR로 텍스트 추출 중…") : "추출된 텍스트가 여기 표시됩니다. 필요하면 직접 수정할 수 있습니다."}
+									placeholder={!selected ? "이미지를 선택하세요." : selected?.excludedFromTarget ? "대상에서 제외된 이미지입니다. alt 주입·검수 대상에 포함되지 않습니다." : ocrLoading ? (ocrEngine === "google-vision" ? "Google Cloud Vision으로 텍스트 추출 중…" : ocrEngine === "ocr-space" ? "OCR.space로 텍스트 추출 중…" : "Tesseract OCR(로컬전용)로 텍스트 추출 중…") : "추출된 텍스트가 여기 표시됩니다. 필요하면 직접 수정할 수 있습니다."}
 									aria-busy={ocrLoading}
 									className="min-h-0 flex-1 resize-none border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
 									spellCheck={false}

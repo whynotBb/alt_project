@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { ocrImageBufferGoogleVision } from "@/lib/pipeline/ocr-google-vision";
 import { ocrImageBuffer } from "@/lib/pipeline/ocr-tesseract";
+import { ocrImageBufferOcrSpace } from "@/lib/pipeline/ocr-ocrspace";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,9 +10,11 @@ export const maxDuration = 120;
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
-function parseEngine(raw: FormDataEntryValue | null): "tesseract" | "google-vision" {
+function parseEngine(raw: FormDataEntryValue | null): "tesseract" | "google-vision" | "ocr-space" {
   if (raw === "google-vision") return "google-vision";
-  return "tesseract";
+  if (raw === "tesseract") return "tesseract";
+  if (raw === "ocr-space") return "ocr-space";
+  return "ocr-space";
 }
 
 export async function POST(request: Request): Promise<NextResponse<{ text: string } | { message: string }>> {
@@ -44,6 +47,14 @@ export async function POST(request: Request): Promise<NextResponse<{ text: strin
       return NextResponse.json({ text });
     }
 
+    if (engine === "ocr-space") {
+      // Base64 업로드는 `filetype`이 정확하지 않으면 실패율이 올라가서,
+      // OCR.space쪽은 rotate + png로 통일해서 전송합니다.
+      const prepared = await sharp(buf).rotate().png().toBuffer();
+      const text = await ocrImageBufferOcrSpace(prepared, { uploadContentType: "image/png" });
+      return NextResponse.json({ text });
+    }
+
     const preprocessed = await sharp(buf)
       .rotate()
       .grayscale()
@@ -57,7 +68,9 @@ export async function POST(request: Request): Promise<NextResponse<{ text: strin
     console.error("[ocr-image]", e);
     const msg = e instanceof Error ? e.message : "OCR 처리 중 오류가 났습니다.";
     const status =
-      typeof msg === "string" && msg.includes("GOOGLE_CLOUD_VISION_API_KEY") ? 503 : 502;
+      typeof msg === "string" && (msg.includes("GOOGLE_CLOUD_VISION_API_KEY") || msg.includes("OCR_SPACE_API_KEY"))
+        ? 503
+        : 502;
     return NextResponse.json({ message: msg }, { status });
   }
 }
