@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
 const links = [
-	{ href: "/", label: "파일 검수", icon: Upload },
+	{ href: "/", label: "ALT 작성 및 검수", icon: Upload },
 	{ href: "/admin/ip-allowlist", label: "IP 관리", icon: Shield },
 	{ href: "/admin/audit-logs", label: "활동 로그", icon: LayoutDashboard },
 ] as const;
@@ -23,15 +23,12 @@ export async function SiteHeader() {
 					<span className="flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary">
 						<FileSpreadsheet className="size-5" aria-hidden />
 					</span>
-					<span className="leading-tight">
-						Alt Inspector
-						<span className="hidden text-[11px] font-normal text-muted-foreground sm:block">이미지 접근성 검수</span>
-					</span>
+					<span className="leading-tight">Alt-Text Helper</span>
 				</Link>
 				<div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
 					<nav aria-label="주요 메뉴" className="flex flex-wrap gap-0.5 sm:gap-1">
 						{links.map(({ href, label, icon: Icon }) => (
-							<Link key={href} href={href} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:px-3">
+							<Link key={href} href={href} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary sm:px-3">
 								<Icon className="size-4 shrink-0 opacity-80" aria-hidden />
 								<span className="hidden sm:inline">{label}</span>
 							</Link>

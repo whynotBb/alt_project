@@ -4,10 +4,14 @@ export type OcrImageItem = {
   url: string;
 };
 
+/** `/api/ocr-image`의 `engine` 필드와 동일 */
+export type OcrEngineId = "tesseract" | "google-vision";
+
 const SVG_PLACEHOLDER = "(SVG는 OCR 대상이 아닙니다. 대체텍스트를 직접 입력해 주세요.)";
 
 export async function requestOcrForImageItem(
   item: OcrImageItem,
+  engine: OcrEngineId = "tesseract",
 ): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
   if (item.name.toLowerCase().endsWith(".svg")) {
     return { ok: true, text: SVG_PLACEHOLDER };
@@ -19,6 +23,7 @@ export async function requestOcrForImageItem(
     const fileName = item.name.split("/").pop() ?? "image.png";
     const fd = new FormData();
     fd.append("file", blob, fileName);
+    fd.append("engine", engine);
 
     const res = await fetch("/api/ocr-image", { method: "POST", body: fd });
     const data = (await res.json()) as { text?: string; message?: string };
