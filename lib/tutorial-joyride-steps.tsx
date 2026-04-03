@@ -12,14 +12,14 @@ export const TUTORIAL_JOYRIDE_STEP_IDS = {
 	exportDeliverables: "tutorial-export",
 } as const;
 
-const demo = (s: string) => <p className="m-0 text-sm leading-relaxed text-pretty">{s}</p>;
+const demo = (s: string) => <p className="m-0 text-xs leading-relaxed text-pretty">{s}</p>;
 
 export function getTutorialJoyrideSteps(): Step[] {
 	return [
 		{
 			id: TUTORIAL_JOYRIDE_STEP_IDS.upload,
 			target: '[data-tutorial="upload"]',
-			title: "Step 1. 데이터 업로드 (통합)",
+			title: "Step 1. 데이터 업로드",
 			content: demo("이미지나 ZIP 파일을 업로드하세요. HTML 파일이 포함되면 자동으로 매칭됩니다."),
 			placement: "right",
 			skipBeacon: true,
