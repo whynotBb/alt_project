@@ -135,6 +135,11 @@ export function ImageReviewWorkspace() {
 	const spellPreviewResizeRef = useRef<{ pointerId: number; startY: number; startH: number } | null>(null);
 
 	const selected = items.find((i) => i.id === selectedId) ?? null;
+	const itemNames = useMemo(() => items.map((i) => i.name), [items]);
+	const selectedDeliverableLabel = useMemo(
+		() => (selected ? excelDeliverableImagePathLabel(selected.name, itemNames) : null),
+		[selected, itemNames],
+	);
 	const reviewTargetCount = items.filter((i) => !i.excludedFromTarget).length;
 	const reviewedCount = items.filter((i) => !i.excludedFromTarget && i.reviewed).length;
 	const excludedCount = items.filter((i) => i.excludedFromTarget).length;
@@ -187,6 +192,11 @@ export function ImageReviewWorkspace() {
 			return;
 		}
 
+		if (!imageReviewEnabled) {
+			setOcrLoading(false);
+			return;
+		}
+
 		let cancelled = false;
 
 		const run = async () => {
@@ -229,7 +239,7 @@ export function ImageReviewWorkspace() {
 		return () => {
 			cancelled = true;
 		};
-	}, [selectedId, ocrEngine]);
+	}, [selectedId, ocrEngine, imageReviewEnabled]);
 
 	useEffect(() => {
 		setSpellHits([]);
@@ -338,6 +348,7 @@ export function ImageReviewWorkspace() {
 	);
 
 	const handleReExtract = useCallback(async () => {
+		if (!imageReviewEnabled) return;
 		const id = selectedId;
 		if (!id) return;
 		const item = itemsRef.current.find((i) => i.id === id);
@@ -357,7 +368,7 @@ export function ImageReviewWorkspace() {
 		} finally {
 			setOcrLoading(false);
 		}
-	}, [selectedId, ocrEngine]);
+	}, [selectedId, ocrEngine, imageReviewEnabled]);
 
 	const copyExtractedText = useCallback(async () => {
 		if (!selected) return;
@@ -795,115 +806,146 @@ export function ImageReviewWorkspace() {
 						<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
 							<div className="min-w-0">
 								<h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">대체텍스트 추출 및 편집</h1>
-								<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">왼쪽 목록에서 파일을 추가한 뒤, 추출 텍스트와 최종 ALT를 편집·승인합니다.</p>
+								<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">
+									{imageReviewEnabled
+										? "왼쪽 목록에서 파일을 추가한 뒤, 추출 텍스트와 최종 ALT를 편집·승인합니다."
+										: "이미지 검수 OFF: 텍스트 추출 없이 최종 ALT만 편집합니다. (ZIP·HTML이 있으면 alt는 자동 반영됩니다.)"}
+								</p>
 							</div>
-							<div className="flex shrink-0 flex-col gap-1 sm:items-end">
-								<Label id="ocr-engine-label" className="text-[10px] font-medium text-muted-foreground">
-									텍스트 추출 엔진
-								</Label>
-								<DropdownMenu>
-									<DropdownMenuTrigger type="button" disabled={ocrLoading || isParsingZip} aria-labelledby="ocr-engine-label" title={"구글 비전 : 무료 1,000장/월\nOCR.space : 무료 25,000장/월\nTesseract : 로컬 전용"} className={cn(buttonVariants({ variant: "outline", size: "default" }), "h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm", "data-disabled:pointer-events-none data-disabled:opacity-50")}>
-										<span className="min-w-0 truncate">{ocrEngineLabel(ocrEngine)}</span>
-										<ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end" className="min-w-42">
-										<DropdownMenuRadioGroup
-											value={ocrEngine}
-											onValueChange={(v) => {
-												if (v === "tesseract" || v === "google-vision" || v === "ocr-space") setOcrEngine(v);
-											}}
-										>
-											{OCR_ENGINE_OPTIONS.map((opt) => (
-												<DropdownMenuRadioItem key={opt.value} value={opt.value} closeOnClick className="text-xs">
-													{opt.label}
-												</DropdownMenuRadioItem>
-											))}
-										</DropdownMenuRadioGroup>
-									</DropdownMenuContent>
-								</DropdownMenu>
-							</div>
+							{imageReviewEnabled ? (
+								<div className="flex shrink-0 flex-col gap-1 sm:items-end">
+									<Label id="ocr-engine-label" className="text-[10px] font-medium text-muted-foreground">
+										텍스트 추출 엔진
+									</Label>
+									<DropdownMenu>
+										<DropdownMenuTrigger type="button" disabled={ocrLoading || isParsingZip} aria-labelledby="ocr-engine-label" title={"구글 비전 : 무료 1,000장/월\nOCR.space : 무료 25,000장/월\nTesseract : 로컬 전용"} className={cn(buttonVariants({ variant: "outline", size: "default" }), "h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm", "data-disabled:pointer-events-none data-disabled:opacity-50")}>
+											<span className="min-w-0 truncate">{ocrEngineLabel(ocrEngine)}</span>
+											<ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end" className="min-w-42">
+											<DropdownMenuRadioGroup
+												value={ocrEngine}
+												onValueChange={(v) => {
+													if (v === "tesseract" || v === "google-vision" || v === "ocr-space") setOcrEngine(v);
+												}}
+											>
+												{OCR_ENGINE_OPTIONS.map((opt) => (
+													<DropdownMenuRadioItem key={opt.value} value={opt.value} closeOnClick className="text-xs">
+														{opt.label}
+													</DropdownMenuRadioItem>
+												))}
+											</DropdownMenuRadioGroup>
+										</DropdownMenuContent>
+									</DropdownMenu>
+								</div>
+							) : null}
 						</div>
 					</header>
 
 					<div className="min-h-0 flex-1">
-						<div className="grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-							<div data-tutorial="viewer-extract" className="col-span-1 flex min-h-[200px] flex-col divide-y divide-border/80 lg:col-span-2 lg:min-h-0 lg:flex-row lg:divide-x lg:divide-y-0">
-								<div className="flex min-h-[200px] flex-1 flex-col lg:min-h-0">
-									<div className="border-b border-border/80 bg-muted/30 px-3 py-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
+						<div
+							className={cn(
+								"grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-rows-1 lg:divide-x lg:divide-y-0 lg:items-stretch",
+								imageReviewEnabled ? "lg:grid-cols-3" : "lg:grid-cols-2",
+							)}
+						>
+							<div
+								data-tutorial="viewer-extract"
+								className={cn(
+									"col-span-1 flex w-full min-h-[200px] flex-col divide-y divide-border/80 lg:h-full lg:min-h-0",
+									imageReviewEnabled ? "lg:col-span-2 lg:flex-row lg:divide-x lg:divide-y-0" : "lg:col-span-1",
+								)}
+							>
+								<div className="flex w-full min-h-[200px] flex-1 flex-col lg:min-h-0">
+									<div className="shrink-0 border-b border-border/80 bg-muted/30 px-3 py-2">
+										<div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
+										{selected && selectedDeliverableLabel ? (
+											<p
+												className="mt-1.5 break-all text-[11px] font-medium leading-snug text-foreground/90"
+												title={selectedDeliverableLabel !== selected.name ? `${selectedDeliverableLabel} — ${selected.name}` : selected.name}
+											>
+												{selectedDeliverableLabel}
+											</p>
+										) : (
+											<p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">목록에서 이미지를 선택하면 파일명이 여기 표시됩니다.</p>
+										)}
+									</div>
 									<div className="flex min-h-0 flex-1 flex-col p-4">{selected ? <ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} /> : <p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>}</div>
 								</div>
-								<div className="flex min-h-[200px] flex-1 flex-col lg:min-h-0">
-									<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
-										<Label htmlFor="extracted-text" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-											추출 텍스트 (편집)
-										</Label>
-										<div className="flex shrink-0 flex-wrap items-center gap-1">
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												className="h-7 gap-1 px-2 text-xs text-primary hover:bg-primary/10"
-												disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-												onClick={(e) => {
-													e.stopPropagation();
-													void handleReExtract();
-												}}
-											>
-												<RefreshCw className={cn("size-3.5", ocrLoading && "animate-spin")} aria-hidden />
-												다시 추출
-											</Button>
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												className="h-7 shrink-0 gap-1.5 px-2 text-xs text-cyan-700 hover:bg-cyan-500/10 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
-												disabled={!selected || ocrLoading}
-												onClick={(e) => {
-													e.stopPropagation();
-													void copyExtractedText();
-												}}
-											>
-												<Copy className="size-3.5" aria-hidden />
-												{copyFlash ? "복사됨" : "클립보드 복사"}
-											</Button>
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												className="h-7 gap-1 px-2 text-xs text-violet-800 hover:bg-violet-500/10 hover:text-violet-900 dark:text-violet-300 dark:hover:text-violet-200"
-												disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-												onClick={(e) => {
-													e.stopPropagation();
-													applyExtractedToFinalAlt();
-												}}
-												title="추출 텍스트를 최종 ALT로 적용"
-											>
-												<ArrowRight className="size-3.5" aria-hidden />
-												최종 ALT로
-											</Button>
+								{imageReviewEnabled ? (
+									<div className="flex w-full min-h-[200px] flex-1 flex-col lg:min-h-0">
+										<div className="flex shrink-0 flex-col gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
+											<Label htmlFor="extracted-text" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+												추출 텍스트 (편집)
+											</Label>
+											<div className="flex flex-wrap items-center gap-1">
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													className="h-7 gap-1 px-2 text-xs text-primary hover:bg-primary/10"
+													disabled={!selected || ocrLoading || selected?.excludedFromTarget}
+													onClick={(e) => {
+														e.stopPropagation();
+														void handleReExtract();
+													}}
+												>
+													<RefreshCw className={cn("size-3.5", ocrLoading && "animate-spin")} aria-hidden />
+													다시 추출
+												</Button>
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													className="h-7 shrink-0 gap-1.5 px-2 text-xs text-cyan-700 hover:bg-cyan-500/10 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
+													disabled={!selected || ocrLoading}
+													onClick={(e) => {
+														e.stopPropagation();
+														void copyExtractedText();
+													}}
+												>
+													<Copy className="size-3.5" aria-hidden />
+													{copyFlash ? "복사됨" : "클립보드 복사"}
+												</Button>
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													className="h-7 gap-1 px-2 text-xs text-violet-800 hover:bg-violet-500/10 hover:text-violet-900 dark:text-violet-300 dark:hover:text-violet-200"
+													disabled={!selected || ocrLoading || selected?.excludedFromTarget}
+													onClick={(e) => {
+														e.stopPropagation();
+														applyExtractedToFinalAlt();
+													}}
+													title="추출 텍스트를 최종 ALT로 적용"
+												>
+													<ArrowRight className="size-3.5" aria-hidden />
+													최종 ALT로
+												</Button>
+											</div>
 										</div>
+										<textarea
+											id="extracted-text"
+											value={selected?.extractedText ?? ""}
+											onChange={(e) => {
+												const v = e.target.value;
+												updateSelectedText(v);
+											}}
+											disabled={!selected || ocrLoading || selected?.excludedFromTarget}
+											placeholder={!selected ? "이미지를 선택하세요." : selected?.excludedFromTarget ? "대상에서 제외된 이미지입니다. alt 주입·검수 대상에 포함되지 않습니다." : ocrLoading ? (ocrEngine === "google-vision" ? "Google Cloud Vision으로 텍스트 추출 중…" : ocrEngine === "ocr-space" ? "OCR.space로 텍스트 추출 중…" : "Tesseract OCR(로컬전용)로 텍스트 추출 중…") : "추출된 텍스트가 여기 표시됩니다. 필요하면 직접 수정할 수 있습니다."}
+											aria-busy={ocrLoading}
+											className="min-h-0 flex-1 resize-none border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
+											spellCheck={false}
+										/>
 									</div>
-									<textarea
-										id="extracted-text"
-										value={selected?.extractedText ?? ""}
-										onChange={(e) => {
-											const v = e.target.value;
-											updateSelectedText(v);
-										}}
-										disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-										placeholder={!selected ? "이미지를 선택하세요." : selected?.excludedFromTarget ? "대상에서 제외된 이미지입니다. alt 주입·검수 대상에 포함되지 않습니다." : ocrLoading ? (ocrEngine === "google-vision" ? "Google Cloud Vision으로 텍스트 추출 중…" : ocrEngine === "ocr-space" ? "OCR.space로 텍스트 추출 중…" : "Tesseract OCR(로컬전용)로 텍스트 추출 중…") : "추출된 텍스트가 여기 표시됩니다. 필요하면 직접 수정할 수 있습니다."}
-										aria-busy={ocrLoading}
-										className="min-h-0 flex-1 resize-none border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
-										spellCheck={false}
-									/>
-								</div>
+								) : null}
 							</div>
-							<div data-tutorial="final-alt" className="flex min-h-[200px] flex-col lg:min-h-0">
-								<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
+							<div data-tutorial="final-alt" className="flex h-full w-full min-h-[200px] flex-col lg:min-h-0">
+								<div className="flex shrink-0 flex-col gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
 									<Label htmlFor="final-alt-text" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
 										최종 ALT (편집)
 									</Label>
-									<div className="flex shrink-0 flex-wrap items-center gap-1">
+									<div className="flex flex-wrap items-center gap-1">
 										<Button
 											type="button"
 											variant="ghost"
@@ -961,8 +1003,20 @@ export function ImageReviewWorkspace() {
 										}
 									}}
 									disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-									placeholder={!selected ? "이미지를 선택하세요." : selected?.excludedFromTarget ? "대상에서 제외된 이미지입니다." : htmlAssets.length === 0 ? "HTML과 함께 ZIP을 넣으면 img alt가 있을 때 여기에 먼저 채워집니다. 승인 시 빈 alt에 주입됩니다." : "HTML에 매칭된 img의 alt가 있으면 표시됩니다. 없으면 직접 입력하세요."}
-									aria-busy={ocrLoading}
+									placeholder={
+										!selected
+											? "이미지를 선택하세요."
+											: selected?.excludedFromTarget
+												? "대상에서 제외된 이미지입니다."
+												: !imageReviewEnabled
+													? htmlAssets.length === 0
+														? "검수 OFF: 최종 ALT를 직접 입력하세요. HTML·이미지 ZIP을 넣으면 매칭 alt가 여기 채워집니다."
+														: "HTML에 매칭된 img의 alt가 있으면 표시됩니다. 없으면 직접 입력하세요."
+													: htmlAssets.length === 0
+														? "HTML과 함께 ZIP을 넣으면 img alt가 있을 때 여기에 먼저 채워집니다. 승인 시 빈 alt에 주입됩니다."
+														: "HTML에 매칭된 img의 alt가 있으면 표시됩니다. 없으면 직접 입력하세요."
+									}
+									aria-busy={imageReviewEnabled && ocrLoading}
 									className="min-h-0 flex-1 resize-none border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
 									spellCheck={false}
 								/>
