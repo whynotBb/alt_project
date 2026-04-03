@@ -2,7 +2,7 @@ import JSZip from "jszip";
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 const HTML_EXT = /\.html?$/i;
-const MAX_HTML_ENTRIES = 200;
+export const MAX_HTML_ENTRIES = 200;
 
 export type ExtractedZipImage = { relativePath: string; blob: Blob };
 export type ExtractedZipHtml = { relativePath: string; content: string };
@@ -50,6 +50,11 @@ export async function extractZipAssets(file: File): Promise<{
 export function isZipFile(file: File): boolean {
   const n = file.name.toLowerCase();
   return file.type === "application/zip" || file.type === "application/x-zip-compressed" || n.endsWith(".zip");
+}
+
+/** 브라우저에서 단일 선택해 올린 HTML 파일(확장자·MIME 기준) */
+export function isHtmlUploadFile(file: File): boolean {
+  return file.type === "text/html" || HTML_EXT.test(file.name);
 }
 
 export function zipArchiveLabel(fileName: string): string {

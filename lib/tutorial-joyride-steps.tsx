@@ -20,7 +20,7 @@ export function getTutorialJoyrideSteps(): Step[] {
 			id: TUTORIAL_JOYRIDE_STEP_IDS.upload,
 			target: '[data-tutorial="upload"]',
 			title: "Step 1. 데이터 업로드",
-			content: demo("이미지나 ZIP 파일을 업로드하세요. HTML 파일이 포함되면 자동으로 매칭됩니다."),
+			content: demo("이미지·HTML·ZIP 파일을 업로드하세요. HTML이 있으면 img alt와 목록이 서로 맞게 자동 매칭됩니다."),
 			placement: "right",
 			skipBeacon: true,
 			scrollOffset: 120,

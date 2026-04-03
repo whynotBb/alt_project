@@ -10,7 +10,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { extractZipAssets, isZipFile, zipArchiveLabel } from "@/lib/client/extract-zip-assets";
+import { extractZipAssets, isHtmlUploadFile, isZipFile, MAX_HTML_ENTRIES, zipArchiveLabel } from "@/lib/client/extract-zip-assets";
 import { requestOcrForImageItem, type OcrEngineId } from "@/lib/client/ocr-image-fetch";
 import { applySpellHits } from "@/lib/client/apply-spell-hits";
 import { SpellDiffPreview } from "@/components/spell-diff-preview";
@@ -149,6 +149,11 @@ export function ImageReviewWorkspace() {
 	const allReviewComplete = reviewTargetCount > 0 && reviewedCount === reviewTargetCount;
 	const hasOnlyHtml = items.length === 0 && htmlAssets.length > 0;
 	const canExportDeliverables = htmlAssets.length > 0 && (!imageReviewEnabled || allReviewComplete || hasOnlyHtml);
+	/** HTML 없이 이미지만 있는데 내보내기를 시도할 수 있는 상태(검수 ON이면 전부 완료된 경우만) */
+	const needsHtmlToExport =
+		htmlAssets.length === 0 && items.length > 0 && (!imageReviewEnabled || allReviewComplete);
+	const canClickExportDeliverables =
+		!exportLoading && !isParsingZip && (canExportDeliverables || needsHtmlToExport);
 
 	const itemsRef = useRef<ImageItem[]>([]);
 	itemsRef.current = items;
@@ -274,11 +279,14 @@ export function ImageReviewWorkspace() {
 
 				let room = MAX_IMAGES - items.length;
 
+				const priorHtmlCount = htmlAssetsRef.current.length;
+
 				for (const file of files) {
 					if (isZipFile(file)) {
 						const { images, htmlFiles } = await extractZipAssets(file);
 						const base = zipArchiveLabel(file.name);
 						for (const h of htmlFiles) {
+							if (priorHtmlCount + newHtml.length >= MAX_HTML_ENTRIES) break;
 							newHtml.push({
 								id: crypto.randomUUID(),
 								relativePath: `${base}/${h.relativePath}`,
@@ -299,6 +307,16 @@ export function ImageReviewWorkspace() {
 							});
 							room -= 1;
 						}
+					} else if (isHtmlUploadFile(file)) {
+						if (priorHtmlCount + newHtml.length >= MAX_HTML_ENTRIES) break;
+						const content = await file.text();
+						const relativePath = file.name.replace(/\\/g, "/");
+						newHtml.push({
+							id: crypto.randomUUID(),
+							relativePath,
+							content,
+							originalContent: content,
+						});
 					} else if (file.type.startsWith("image/")) {
 						if (room <= 0) break;
 						newImages.push({
@@ -337,6 +355,15 @@ export function ImageReviewWorkspace() {
 						return [...prev, ...stamped].slice(0, MAX_IMAGES);
 					});
 					setSelectedId((cur) => cur ?? newImages[0].id);
+				} else if (newHtml.length > 0) {
+					setItems((prev) => {
+						if (prev.length === 0) return prev;
+						return prev.map((img) => {
+							const fromHtml = getExistingAltFromHtmlForImage(img.name, mergedHtmlSnapshot);
+							if (fromHtml && !img.finalAlt.trim()) return { ...img, finalAlt: fromHtml };
+							return img;
+						});
+					});
 				}
 			} catch (e) {
 				setSideNotice(e instanceof Error ? e.message : "ZIP을 읽는 중 오류가 났습니다.");
@@ -583,7 +610,14 @@ export function ImageReviewWorkspace() {
 		const snapshotItems = itemsRef.current;
 		const snapshotHtml = htmlAssetsRef.current;
 		const targets = snapshotItems.filter((i) => !i.excludedFromTarget);
-		if (snapshotHtml.length === 0) return;
+		if (snapshotHtml.length === 0) {
+			const reviewReady =
+				!imageReviewEnabled || (targets.length > 0 && targets.every((i) => i.reviewed));
+			if (snapshotItems.length > 0 && reviewReady) {
+				setSideNotice("산출물을 만들려면 HTML이 필요합니다. HTML 파일을 추가하거나 ZIP으로 업로드해 주세요.");
+			}
+			return;
+		}
 		if (!imageReviewEnabled) {
 			setExportLoading(true);
 			setSideNotice(null);
@@ -696,6 +730,22 @@ export function ImageReviewWorkspace() {
 					setItems((prev) => prev.map((it) => (it.id === firstId && !it.excludedFromTarget ? { ...it, reviewed: true } : it)));
 				});
 			}
+			/** Step 8 산출물: 더미 HTML + 전부 검수 완료로 두어 다운로드 플로우 유지 */
+			if (data.index === 7) {
+				const demoHtml =
+					'<!DOCTYPE html><html><body><img src="tutorial_1.png" alt="" /></body></html>';
+				afterCommit(() => {
+					setItems((prev) => prev.map((it) => (!it.excludedFromTarget ? { ...it, reviewed: true } : it)));
+					setHtmlAssets([
+						{
+							id: crypto.randomUUID(),
+							relativePath: "tutorial-demo.html",
+							content: demoHtml,
+							originalContent: demoHtml,
+						},
+					]);
+				});
+			}
 		}
 	}, []);
 
@@ -724,7 +774,7 @@ export function ImageReviewWorkspace() {
 						<input
 							ref={inputRef}
 							type="file"
-							accept="image/*,.zip,application/zip,application/x-zip-compressed"
+							accept="image/*,.zip,application/zip,application/x-zip-compressed,.html,.htm,text/html"
 							multiple
 							className="sr-only"
 							onChange={async (e) => {
@@ -736,12 +786,12 @@ export function ImageReviewWorkspace() {
 							type="button"
 							data-tutorial="upload"
 							className={cn("mb-2 flex w-full flex-col items-stretch gap-2 rounded-xl border-2 border-dashed bg-card px-2.5 py-2.5 text-left shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring", dropActive ? "border-cyan-400 bg-cyan-50/50 dark:bg-cyan-950/30" : "border-primary/30 hover:border-primary/50 hover:bg-primary/3")}
-							disabled={total >= MAX_IMAGES || isParsingZip}
+							disabled={isParsingZip}
 							onClick={openFilePicker}
 							onDragOver={(e) => {
 								e.preventDefault();
 								e.stopPropagation();
-								if (!isParsingZip && total < MAX_IMAGES) setDropActive(true);
+								if (!isParsingZip) setDropActive(true);
 							}}
 							onDragLeave={(e) => {
 								e.preventDefault();
@@ -752,16 +802,16 @@ export function ImageReviewWorkspace() {
 								e.preventDefault();
 								e.stopPropagation();
 								setDropActive(false);
-								if (isParsingZip || total >= MAX_IMAGES) return;
+								if (isParsingZip) return;
 								await handleAddFiles(e.dataTransfer.files);
 							}}
-							aria-label="이미지 또는 ZIP 파일 추가"
+							aria-label="이미지, HTML 또는 ZIP 파일 추가"
 						>
 							<div className="flex items-center justify-center">
 								<div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-cyan-400/25 text-primary">{isParsingZip ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Upload className="size-3.5" aria-hidden />}</div>
 							</div>
 							<div className="text-center">
-								<p className="text-[11px] leading-tight font-semibold text-foreground">{isParsingZip ? "처리 중…" : "이미지 · ZIP 추가"}</p>
+								<p className="text-[11px] leading-tight font-semibold text-foreground">{isParsingZip ? "처리 중…" : "이미지 · HTML · ZIP"}</p>
 								<p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">끌어놓기 또는 클릭 · HTML은 alt 주입용</p>
 							</div>
 						</button>
@@ -776,7 +826,7 @@ export function ImageReviewWorkspace() {
 
 					<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-2" data-tutorial="image-list">
 						{items.length === 0 ? (
-							<p className="px-1 py-4 text-center text-sm text-muted-foreground">이미지 또는 ZIP을 추가하면 목록이 여기에 표시됩니다. ZIP에는 HTML과 이미지가 함께 있어도 됩니다.</p>
+							<p className="px-1 py-4 text-center text-sm text-muted-foreground">이미지·HTML·ZIP을 추가하면 목록이 여기에 표시됩니다. ZIP에는 HTML과 이미지가 함께 있어도 됩니다.</p>
 						) : (
 							<div className="min-h-0 h-full">
 								<List rowCount={items.length} rowHeight={LIST_ITEM_HEIGHT} rowComponent={ImageListRow} rowProps={{ items, itemNames: items.map((i) => i.name), selectedId, onSelect: setSelectedId }} listRef={listRef} defaultHeight={320} style={{ height: "100%" }} />
@@ -793,11 +843,18 @@ export function ImageReviewWorkspace() {
 								</span>
 							</span>
 						</button>
-						<Button type="button" data-tutorial="export-deliverables" variant="secondary" className="w-full gap-2" disabled={!canExportDeliverables || exportLoading || isParsingZip} onClick={() => void handleExportDeliverables()}>
+						<Button type="button" data-tutorial="export-deliverables" variant="secondary" className="w-full gap-2" disabled={!canClickExportDeliverables} onClick={() => void handleExportDeliverables()}>
 							{exportLoading ? <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> : <FolderOutput className="size-4 shrink-0" aria-hidden />}
 							산출물보내기
 						</Button>
-						{!canExportDeliverables && items.length > 0 && imageReviewEnabled ? <p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">검수 대상을 모두 승인하고, ZIP에서 가져온 HTML이 있어야 합니다.</p> : null}
+						{items.length > 0 && imageReviewEnabled && !canExportDeliverables ? (
+							<p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">
+								{!allReviewComplete ? "검수 대상을 모두 승인해야 합니다." : "HTML 파일을 추가하거나 ZIP으로 업로드해 주세요."}
+							</p>
+						) : null}
+						{items.length > 0 && !imageReviewEnabled && htmlAssets.length === 0 ? (
+							<p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">산출물 반영을 위해 HTML을 추가해 주세요.</p>
+						) : null}
 					</div>
 				</aside>
 
