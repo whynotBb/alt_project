@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 
 const links = [
 	{ href: "/", label: "ALT 작성 및 검수", icon: Upload },
-	{ href: "/admin/ip-allowlist", label: "IP 관리", icon: Shield },
-	{ href: "/admin/audit-logs", label: "활동 로그", icon: LayoutDashboard },
+	// { href: "/admin/ip-allowlist", label: "IP 관리", icon: Shield },
+	// { href: "/admin/audit-logs", label: "활동 로그", icon: LayoutDashboard },
 ] as const;
 
 export async function SiteHeader() {
@@ -37,13 +37,7 @@ export async function SiteHeader() {
 					</nav>
 					<div className="mx-0.5 hidden h-6 w-px bg-border sm:block" aria-hidden />
 					<ThemeToggle />
-					<Link
-						href="/?tutorial=1"
-						className={cn(
-							buttonVariants({ variant: "default", size: "sm" }),
-							"h-8 tracking-wide no-underline",
-						)}
-					>
+					<Link href="/?tutorial=1" className={cn(buttonVariants({ variant: "default", size: "sm" }), "h-8 tracking-wide no-underline")}>
 						TUTORIAL
 					</Link>
 					{session?.user ? (
