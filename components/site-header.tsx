@@ -37,6 +37,15 @@ export async function SiteHeader() {
 					</nav>
 					<div className="mx-0.5 hidden h-6 w-px bg-border sm:block" aria-hidden />
 					<ThemeToggle />
+					<Link
+						href="/?tutorial=1"
+						className={cn(
+							buttonVariants({ variant: "default", size: "sm" }),
+							"h-8 tracking-wide no-underline",
+						)}
+					>
+						TUTORIAL
+					</Link>
 					{session?.user ? (
 						<SignOutButton />
 					) : (

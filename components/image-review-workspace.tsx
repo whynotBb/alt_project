@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Joyride, EVENTS, STATUS, type EventData } from "react-joyride";
 import { ArrowRight, Ban, Check, ChevronDown, Copy, FileCode2, FolderOutput, Loader2, RefreshCw, SpellCheck2, Trash2, Upload, Wand2 } from "lucide-react";
 import JSZip from "jszip";
 import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
@@ -18,6 +20,8 @@ import { injectReviewedAltsIntoHtmlMarkup } from "@/lib/client/html-alt-inject-f
 import { appendAltReviewExcelToJsZip, downloadAltReviewExcelFile } from "@/lib/client/append-alt-review-excel-to-zip";
 import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
+import { TUTORIAL_DUMMY_IMAGE_ITEMS } from "@/lib/tutorial-dummy";
+import { getTutorialJoyrideSteps, TUTORIAL_EXAMPLE_EXTRACTED_TEXT } from "@/lib/tutorial-joyride-steps";
 
 const OCR_ENGINE_OPTIONS: { value: OcrEngineId; label: string }[] = [
 	{ value: "ocr-space", label: "OCR.space" },
@@ -48,6 +52,18 @@ type ImageItem = {
 	reviewed: boolean;
 	excludedFromTarget: boolean;
 };
+
+function tutorialDummyToImageItems(): ImageItem[] {
+	return TUTORIAL_DUMMY_IMAGE_ITEMS.map((d) => ({
+		id: d.id,
+		name: d.fileName,
+		url: d.publicPath,
+		extractedText: "",
+		finalAlt: "",
+		reviewed: false,
+		excludedFromTarget: false,
+	}));
+}
 
 type HtmlAsset = {
 	id: string;
@@ -94,8 +110,13 @@ function ImageListRow({ index, style, ...data }: RowComponentProps<ImageListRowD
 }
 
 export function ImageReviewWorkspace() {
+	const router = useRouter();
+	const searchParams = useSearchParams();
 	const inputRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<ListImperativeAPI | null>(null);
+	const joyrideTutorialActiveRef = useRef(false);
+	const [runTutorialJoyride, setRunTutorialJoyride] = useState(false);
+	const tutorialSteps = useMemo(() => getTutorialJoyrideSteps(), []);
 	const [items, setItems] = useState<ImageItem[]>([]);
 	const [htmlAssets, setHtmlAssets] = useState<HtmlAsset[]>([]);
 	const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -130,6 +151,14 @@ export function ImageReviewWorkspace() {
 	htmlAssetsRef.current = htmlAssets;
 
 	useEffect(() => {
+		const t = searchParams.get("tutorial");
+		if (t === "1" || t === "true") {
+			setRunTutorialJoyride(true);
+			router.replace("/", { scroll: false });
+		}
+	}, [searchParams, router]);
+
+	useEffect(() => {
 		return () => {
 			for (const it of itemsRef.current) {
 				URL.revokeObjectURL(it.url);
@@ -161,6 +190,11 @@ export function ImageReviewWorkspace() {
 		let cancelled = false;
 
 		const run = async () => {
+			if (joyrideTutorialActiveRef.current) {
+				setOcrLoading(false);
+				return;
+			}
+
 			const item = itemsRef.current.find((i) => i.id === selectedId);
 			if (!item) return;
 
@@ -595,6 +629,69 @@ export function ImageReviewWorkspace() {
 		}
 	}, [imageReviewEnabled]);
 
+	const handleJoyrideEvent = useCallback((data: EventData) => {
+		/** Joyride가 passive effect 안에서 이 콜백을 호출하므로, 여기서 `flushSync`를 쓰면 React가 오류를 냅니다. */
+		const afterCommit = (fn: () => void) => {
+			queueMicrotask(fn);
+		};
+
+		if (data.type === EVENTS.TOUR_START) {
+			joyrideTutorialActiveRef.current = true;
+			afterCommit(() => {
+				for (const it of itemsRef.current) {
+					if (it.url.startsWith("blob:")) URL.revokeObjectURL(it.url);
+				}
+				setItems([]);
+				setHtmlAssets([]);
+				setSelectedId(null);
+				setSideNotice(null);
+				setSpellHits([]);
+				setSpellBaseline(null);
+			});
+			return;
+		}
+
+		if (data.type === EVENTS.TOUR_END) {
+			joyrideTutorialActiveRef.current = false;
+			setRunTutorialJoyride(false);
+			return;
+		}
+
+		if (data.type === EVENTS.TOUR_STATUS && (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED)) {
+			joyrideTutorialActiveRef.current = false;
+			setRunTutorialJoyride(false);
+			return;
+		}
+
+		if (data.type === EVENTS.STEP_BEFORE) {
+			if (data.index === 1) {
+				afterCommit(() => {
+					setItems(tutorialDummyToImageItems());
+					setSelectedId(TUTORIAL_DUMMY_IMAGE_ITEMS[0].id);
+				});
+			}
+			if (data.index === 3) {
+				const firstId = TUTORIAL_DUMMY_IMAGE_ITEMS[0].id;
+				afterCommit(() => {
+					setSpellHits([]);
+					setSpellBaseline(null);
+					setItems((prev) =>
+						prev.map((it) => (it.id === firstId ? { ...it, extractedText: TUTORIAL_EXAMPLE_EXTRACTED_TEXT } : it)),
+					);
+				});
+			}
+			/** Step 6 진행률: 검수 1건 완료된 것처럼 표시 */
+			if (data.index === 5) {
+				const firstId = TUTORIAL_DUMMY_IMAGE_ITEMS[0].id;
+				afterCommit(() => {
+					setItems((prev) =>
+						prev.map((it) => (it.id === firstId && !it.excludedFromTarget ? { ...it, reviewed: true } : it)),
+					);
+				});
+			}
+		}
+	}, []);
+
 	return (
 		<div className="flex h-[calc(100vh-5rem)] min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-(--app-canvas) shadow-sm">
 			<div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -630,6 +727,7 @@ export function ImageReviewWorkspace() {
 						/>
 						<button
 							type="button"
+							data-tutorial="upload"
 							className={cn("mb-2 flex w-full flex-col items-stretch gap-2 rounded-xl border-2 border-dashed bg-card px-2.5 py-2.5 text-left shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring", dropActive ? "border-cyan-400 bg-cyan-50/50 dark:bg-cyan-950/30" : "border-primary/30 hover:border-primary/50 hover:bg-primary/3")}
 							disabled={total >= MAX_IMAGES || isParsingZip}
 							onClick={openFilePicker}
@@ -669,7 +767,7 @@ export function ImageReviewWorkspace() {
 					) : null}
 					{sideNotice ? <p className="mx-2 mt-2 shrink-0 rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs text-destructive">{sideNotice}</p> : null}
 
-					<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-2">
+					<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-2" data-tutorial="image-list">
 						{items.length === 0 ? (
 							<p className="px-1 py-4 text-center text-sm text-muted-foreground">이미지 또는 ZIP을 추가하면 목록이 여기에 표시됩니다. ZIP에는 HTML과 이미지가 함께 있어도 됩니다.</p>
 						) : (
@@ -679,7 +777,16 @@ export function ImageReviewWorkspace() {
 						)}
 					</div>
 					<div className="shrink-0 border-t border-border/80 bg-card/90 p-2">
-						<button type="button" role="switch" aria-checked={imageReviewEnabled} aria-label="이미지 검수 사용 여부" className="mb-2 flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors" disabled={exportLoading || isParsingZip} onClick={() => setImageReviewEnabled((prev) => !prev)}>
+						<button
+							type="button"
+							data-tutorial="image-review-toggle"
+							role="switch"
+							aria-checked={imageReviewEnabled}
+							aria-label="이미지 검수 사용 여부"
+							className="mb-2 flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors"
+							disabled={exportLoading || isParsingZip}
+							onClick={() => setImageReviewEnabled((prev) => !prev)}
+						>
 							<span className="font-medium text-foreground">이미지 검수</span>
 							<span className="flex items-center gap-2">
 								<span className="text-xs text-muted-foreground">{imageReviewEnabled ? "ON" : "OFF"}</span>
@@ -688,7 +795,14 @@ export function ImageReviewWorkspace() {
 								</span>
 							</span>
 						</button>
-						<Button type="button" variant="secondary" className="w-full gap-2" disabled={!canExportDeliverables || exportLoading || isParsingZip} onClick={() => void handleExportDeliverables()}>
+						<Button
+							type="button"
+							data-tutorial="export-deliverables"
+							variant="secondary"
+							className="w-full gap-2"
+							disabled={!canExportDeliverables || exportLoading || isParsingZip}
+							onClick={() => void handleExportDeliverables()}
+						>
 							{exportLoading ? <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> : <FolderOutput className="size-4 shrink-0" aria-hidden />}
 							산출물보내기
 						</Button>
@@ -708,7 +822,17 @@ export function ImageReviewWorkspace() {
 									텍스트 추출 엔진
 								</Label>
 								<DropdownMenu>
-									<DropdownMenuTrigger type="button" disabled={ocrLoading || isParsingZip} aria-labelledby="ocr-engine-label" className={cn(buttonVariants({ variant: "outline", size: "default" }), "h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm", "data-disabled:pointer-events-none data-disabled:opacity-50")}>
+									<DropdownMenuTrigger
+										type="button"
+										disabled={ocrLoading || isParsingZip}
+										aria-labelledby="ocr-engine-label"
+										title={"OCR.space : 무료 25,000장/월\n구글 비전 : 무료 1,000장/월\nTesseract : 로컬 전용"}
+										className={cn(
+											buttonVariants({ variant: "outline", size: "default" }),
+											"h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm",
+											"data-disabled:pointer-events-none data-disabled:opacity-50",
+										)}
+									>
 										<span className="min-w-0 truncate">{ocrEngineLabel(ocrEngine)}</span>
 										<ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
 									</DropdownMenuTrigger>
@@ -733,11 +857,15 @@ export function ImageReviewWorkspace() {
 
 					<div className="min-h-0 flex-1">
 						<div className="grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-							<div className="flex min-h-[200px] flex-col lg:min-h-0">
-								<div className="border-b border-border/80 bg-muted/30 px-3 py-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
-								<div className="flex min-h-0 flex-1 flex-col p-4">{selected ? <ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} /> : <p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>}</div>
-							</div>
-							<div className="flex min-h-[200px] flex-col lg:min-h-0">
+							<div
+								data-tutorial="viewer-extract"
+								className="col-span-1 flex min-h-[200px] flex-col divide-y divide-border/80 lg:col-span-2 lg:min-h-0 lg:flex-row lg:divide-x lg:divide-y-0"
+							>
+								<div className="flex min-h-[200px] flex-1 flex-col lg:min-h-0">
+									<div className="border-b border-border/80 bg-muted/30 px-3 py-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
+									<div className="flex min-h-0 flex-1 flex-col p-4">{selected ? <ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} /> : <p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>}</div>
+								</div>
+								<div className="flex min-h-[200px] flex-1 flex-col lg:min-h-0">
 								<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
 									<Label htmlFor="extracted-text" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
 										추출 텍스트 (편집)
@@ -801,8 +929,9 @@ export function ImageReviewWorkspace() {
 									className="min-h-0 flex-1 resize-none border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
 									spellCheck={false}
 								/>
+								</div>
 							</div>
-							<div className="flex min-h-[200px] flex-col lg:min-h-0">
+							<div data-tutorial="final-alt" className="flex min-h-[200px] flex-col lg:min-h-0">
 								<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
 									<Label htmlFor="final-alt-text" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
 										최종 ALT (편집)
@@ -887,7 +1016,7 @@ export function ImageReviewWorkspace() {
 
 					<footer className="shrink-0 border-t border-border/80 bg-card/95 px-4 py-3 backdrop-blur-sm" aria-label="검수 진행">
 						<div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-							<div className="min-w-0 flex-1 space-y-1.5">
+							<div className="min-w-0 flex-1 space-y-1.5" data-tutorial="progress-bar">
 								<div className="flex items-center justify-between gap-2 text-sm">
 									<span className="font-medium text-foreground">전체 진행</span>
 									<span className="tabular-nums text-muted-foreground">
@@ -903,7 +1032,7 @@ export function ImageReviewWorkspace() {
 									<div className="h-2 rounded-full bg-muted" aria-hidden />
 								)}
 							</div>
-							<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+							<div className="flex shrink-0 flex-wrap items-center justify-end gap-2" data-tutorial="review-actions">
 								<Button type="button" variant="outline" onClick={handleExcludeFromTarget} disabled={!selected || selected.excludedFromTarget}>
 									<Ban className="size-4" aria-hidden />
 									대상 제외
@@ -920,6 +1049,33 @@ export function ImageReviewWorkspace() {
 					</footer>
 				</div>
 			</div>
+			<Joyride
+				run={runTutorialJoyride}
+				steps={tutorialSteps}
+				continuous
+				scrollToFirstStep
+				onEvent={handleJoyrideEvent}
+				options={{
+					skipBeacon: true,
+					scrollOffset: 120,
+					overlayColor: "rgba(0,0,0,0.72)",
+					spotlightPadding: 10,
+					spotlightRadius: 8,
+					zIndex: 10050,
+					primaryColor: "oklch(0.627 0.248 304)",
+					buttons: ["back", "close", "primary", "skip"],
+					backgroundColor: "#ffffff",
+					textColor: "#000000",
+					arrowColor: "#ffffff",
+				}}
+				locale={{
+					back: "이전",
+					close: "닫기",
+					last: "완료",
+					next: "다음",
+					skip: "건너뛰기",
+				}}
+			/>
 		</div>
 	);
 }

@@ -1,7 +1,7 @@
 import { getBrowserTesseractWorkerOptions } from "@/lib/client/tesseract-cdn-public";
 
 /**
- * 브라우저에서 jsDelivr worker/core로 OCR (서버리스·번들 경로 이슈 회피).
+ * 브라우저에서 `public/vendor/tesseract` 정적 자원으로 OCR (동일 출처 Worker).
  */
 export async function ocrRasterImageBlobWithTesseract(blob: Blob): Promise<string> {
 	const { createWorker } = await import("tesseract.js");
