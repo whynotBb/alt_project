@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Joyride, EVENTS, STATUS, type EventData } from "react-joyride";
 import { ArrowRight, Ban, Check, ChevronDown, Copy, FileCode2, FolderOutput, Loader2, RefreshCw, SpellCheck2, Trash2, Upload, Wand2 } from "lucide-react";
 import JSZip from "jszip";
-import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
+import { List, type ListImperativeAPI } from "react-window";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ import { getExistingAltFromHtmlForImage } from "@/lib/client/existing-alt-from-h
 import { injectReviewedAltsIntoHtmlMarkup } from "@/lib/client/html-alt-inject-from-review";
 import { appendAltReviewExcelToJsZip, downloadAltReviewExcelFile } from "@/lib/client/append-alt-review-excel-to-zip";
 import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
+import { ImageListRow } from "@/components/image-list-row";
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
 import { TUTORIAL_DUMMY_IMAGE_ITEMS } from "@/lib/tutorial-dummy";
 import { getTutorialJoyrideSteps, TUTORIAL_EXAMPLE_EXTRACTED_TEXT } from "@/lib/tutorial-joyride-steps";
@@ -72,43 +73,6 @@ type HtmlAsset = {
 	originalContent: string;
 };
 
-type ImageListRowData = {
-	items: ImageItem[];
-	itemNames: string[];
-	selectedId: string | null;
-	onSelect: (id: string) => void;
-};
-
-function ImageListRow({ index, style, ...data }: RowComponentProps<ImageListRowData>) {
-	const it = data.items[index];
-	const isActive = it.id === data.selectedId;
-	const listLabel = excelDeliverableImagePathLabel(it.name, data.itemNames);
-	return (
-		<div style={style} className="pb-1">
-			<button type="button" data-item-id={it.id} onClick={() => data.onSelect(it.id)} className={cn("flex h-[48px] w-full items-center gap-2 rounded-xl border border-transparent px-2 text-left text-sm transition-colors", isActive ? "border-primary/25 bg-sky-50 shadow-sm dark:bg-sky-950/40" : it.excludedFromTarget ? "text-muted-foreground opacity-80 hover:bg-muted/70" : "text-foreground hover:bg-muted/70")}>
-				<span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-muted/40" aria-hidden>
-					{/* eslint-disable-next-line @next/next/no-img-element */}
-					<img src={it.url} alt="" className="size-full object-cover" />
-				</span>
-				<span className="min-w-0 flex-1 truncate font-medium" title={it.name !== listLabel ? `${listLabel} — ${it.name}` : it.name}>
-					{listLabel}
-				</span>
-				{it.excludedFromTarget ? (
-					<span className="shrink-0 text-base" title="대상 제외" aria-label="대상 제외">
-						⊘
-					</span>
-				) : it.reviewed ? (
-					<span className="shrink-0 text-base" title="검수 완료" aria-label="검수 완료">
-						✅
-					</span>
-				) : (
-					<span className="size-5 shrink-0" aria-hidden />
-				)}
-			</button>
-		</div>
-	);
-}
-
 export function ImageReviewWorkspace() {
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -136,10 +100,7 @@ export function ImageReviewWorkspace() {
 
 	const selected = items.find((i) => i.id === selectedId) ?? null;
 	const itemNames = useMemo(() => items.map((i) => i.name), [items]);
-	const selectedDeliverableLabel = useMemo(
-		() => (selected ? excelDeliverableImagePathLabel(selected.name, itemNames) : null),
-		[selected, itemNames],
-	);
+	const selectedDeliverableLabel = useMemo(() => (selected ? excelDeliverableImagePathLabel(selected.name, itemNames) : null), [selected, itemNames]);
 	const reviewTargetCount = items.filter((i) => !i.excludedFromTarget).length;
 	const reviewedCount = items.filter((i) => !i.excludedFromTarget && i.reviewed).length;
 	const excludedCount = items.filter((i) => i.excludedFromTarget).length;
@@ -150,10 +111,8 @@ export function ImageReviewWorkspace() {
 	const hasOnlyHtml = items.length === 0 && htmlAssets.length > 0;
 	const canExportDeliverables = htmlAssets.length > 0 && (!imageReviewEnabled || allReviewComplete || hasOnlyHtml);
 	/** HTML 없이 이미지만 있는데 내보내기를 시도할 수 있는 상태(검수 ON이면 전부 완료된 경우만) */
-	const needsHtmlToExport =
-		htmlAssets.length === 0 && items.length > 0 && (!imageReviewEnabled || allReviewComplete);
-	const canClickExportDeliverables =
-		!exportLoading && !isParsingZip && (canExportDeliverables || needsHtmlToExport);
+	const needsHtmlToExport = htmlAssets.length === 0 && items.length > 0 && (!imageReviewEnabled || allReviewComplete);
+	const canClickExportDeliverables = !exportLoading && !isParsingZip && (canExportDeliverables || needsHtmlToExport);
 
 	const itemsRef = useRef<ImageItem[]>([]);
 	itemsRef.current = items;
@@ -611,8 +570,7 @@ export function ImageReviewWorkspace() {
 		const snapshotHtml = htmlAssetsRef.current;
 		const targets = snapshotItems.filter((i) => !i.excludedFromTarget);
 		if (snapshotHtml.length === 0) {
-			const reviewReady =
-				!imageReviewEnabled || (targets.length > 0 && targets.every((i) => i.reviewed));
+			const reviewReady = !imageReviewEnabled || (targets.length > 0 && targets.every((i) => i.reviewed));
 			if (snapshotItems.length > 0 && reviewReady) {
 				setSideNotice("산출물을 만들려면 HTML이 필요합니다. HTML 파일을 추가하거나 ZIP으로 업로드해 주세요.");
 			}
@@ -732,8 +690,7 @@ export function ImageReviewWorkspace() {
 			}
 			/** Step 8 산출물: 더미 HTML + 전부 검수 완료로 두어 다운로드 플로우 유지 */
 			if (data.index === 7) {
-				const demoHtml =
-					'<!DOCTYPE html><html><body><img src="tutorial_1.png" alt="" /></body></html>';
+				const demoHtml = '<!DOCTYPE html><html><body><img src="tutorial_1.png" alt="" /></body></html>';
 				afterCommit(() => {
 					setItems((prev) => prev.map((it) => (!it.excludedFromTarget ? { ...it, reviewed: true } : it)));
 					setHtmlAssets([
@@ -829,13 +786,13 @@ export function ImageReviewWorkspace() {
 							<p className="px-1 py-4 text-center text-sm text-muted-foreground">이미지·HTML·ZIP을 추가하면 목록이 여기에 표시됩니다. ZIP에는 HTML과 이미지가 함께 있어도 됩니다.</p>
 						) : (
 							<div className="min-h-0 h-full">
-								<List rowCount={items.length} rowHeight={LIST_ITEM_HEIGHT} rowComponent={ImageListRow} rowProps={{ items, itemNames: items.map((i) => i.name), selectedId, onSelect: setSelectedId }} listRef={listRef} defaultHeight={320} style={{ height: "100%" }} />
+								<List rowCount={items.length} rowHeight={LIST_ITEM_HEIGHT} rowComponent={ImageListRow} rowProps={{ items, itemNames: items.map((i) => i.name), selectedId, onSelect: setSelectedId, variant: "extract" }} listRef={listRef} defaultHeight={320} style={{ height: "100%" }} />
 							</div>
 						)}
 					</div>
 					<div className="shrink-0 border-t border-border/80 bg-card/90 p-2">
 						<button type="button" data-tutorial="image-review-toggle" role="switch" aria-checked={imageReviewEnabled} aria-label="이미지 검수 사용 여부" className="mb-2 flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors" disabled={exportLoading || isParsingZip} onClick={() => setImageReviewEnabled((prev) => !prev)}>
-							<span className="font-medium text-foreground">이미지 검수</span>
+							<span className="font-medium text-foreground">이미지 → 텍스트 추출</span>
 							<span className="flex items-center gap-2">
 								<span className="text-xs text-muted-foreground">{imageReviewEnabled ? "ON" : "OFF"}</span>
 								<span className={cn("relative inline-flex h-5 w-9 items-center rounded-full transition-colors", imageReviewEnabled ? "bg-primary" : "bg-muted")}>
@@ -847,14 +804,8 @@ export function ImageReviewWorkspace() {
 							{exportLoading ? <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> : <FolderOutput className="size-4 shrink-0" aria-hidden />}
 							산출물보내기
 						</Button>
-						{items.length > 0 && imageReviewEnabled && !canExportDeliverables ? (
-							<p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">
-								{!allReviewComplete ? "검수 대상을 모두 승인해야 합니다." : "HTML 파일을 추가하거나 ZIP으로 업로드해 주세요."}
-							</p>
-						) : null}
-						{items.length > 0 && !imageReviewEnabled && htmlAssets.length === 0 ? (
-							<p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">산출물 반영을 위해 HTML을 추가해 주세요.</p>
-						) : null}
+						{items.length > 0 && imageReviewEnabled && !canExportDeliverables ? <p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">{!allReviewComplete ? "검수 대상을 모두 승인해야 합니다." : "HTML 파일을 추가하거나 ZIP으로 업로드해 주세요."}</p> : null}
+						{items.length > 0 && !imageReviewEnabled && htmlAssets.length === 0 ? <p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">산출물 반영을 위해 HTML을 추가해 주세요.</p> : null}
 					</div>
 				</aside>
 
@@ -863,11 +814,7 @@ export function ImageReviewWorkspace() {
 						<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
 							<div className="min-w-0">
 								<h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">대체텍스트 추출 및 편집</h1>
-								<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">
-									{imageReviewEnabled
-										? "왼쪽 목록에서 파일을 추가한 뒤, 추출 텍스트와 최종 ALT를 편집·승인합니다."
-										: "이미지 검수 OFF: 텍스트 추출 없이 최종 ALT만 편집합니다. (ZIP·HTML이 있으면 alt는 자동 반영됩니다.)"}
-								</p>
+								<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">{imageReviewEnabled ? "왼쪽 목록에서 파일을 추가한 뒤, 추출 텍스트와 최종 ALT를 편집·승인합니다." : "이미지 검수 OFF: 텍스트 추출 없이 최종 ALT만 편집합니다. (ZIP·HTML이 있으면 alt는 자동 반영됩니다.)"}</p>
 							</div>
 							{imageReviewEnabled ? (
 								<div className="flex shrink-0 flex-col gap-1 sm:items-end">
@@ -900,27 +847,13 @@ export function ImageReviewWorkspace() {
 					</header>
 
 					<div className="min-h-0 flex-1">
-						<div
-							className={cn(
-								"grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-rows-1 lg:divide-x lg:divide-y-0 lg:items-stretch",
-								imageReviewEnabled ? "lg:grid-cols-3" : "lg:grid-cols-2",
-							)}
-						>
-							<div
-								data-tutorial="viewer-extract"
-								className={cn(
-									"col-span-1 flex w-full min-h-[200px] flex-col divide-y divide-border/80 lg:h-full lg:min-h-0",
-									imageReviewEnabled ? "lg:col-span-2 lg:flex-row lg:divide-x lg:divide-y-0" : "lg:col-span-1",
-								)}
-							>
+						<div className={cn("grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-rows-1 lg:divide-x lg:divide-y-0 lg:items-stretch", imageReviewEnabled ? "lg:grid-cols-3" : "lg:grid-cols-2")}>
+							<div data-tutorial="viewer-extract" className={cn("col-span-1 flex w-full min-h-[200px] flex-col divide-y divide-border/80 lg:h-full lg:min-h-0", imageReviewEnabled ? "lg:col-span-2 lg:flex-row lg:divide-x lg:divide-y-0" : "lg:col-span-1")}>
 								<div className="flex w-full min-h-[200px] flex-1 flex-col lg:min-h-0">
 									<div className="shrink-0 border-b border-border/80 bg-muted/30 px-3 py-2">
 										<div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
 										{selected && selectedDeliverableLabel ? (
-											<p
-												className="mt-1.5 break-all text-[11px] font-medium leading-snug text-foreground/90"
-												title={selectedDeliverableLabel !== selected.name ? `${selectedDeliverableLabel} — ${selected.name}` : selected.name}
-											>
+											<p className="mt-1.5 break-all text-[11px] font-medium leading-snug text-foreground/90" title={selectedDeliverableLabel !== selected.name ? `${selectedDeliverableLabel} — ${selected.name}` : selected.name}>
 												{selectedDeliverableLabel}
 											</p>
 										) : (

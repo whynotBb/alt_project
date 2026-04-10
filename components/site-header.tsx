@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileSpreadsheet, LayoutDashboard, Shield, Upload } from "lucide-react";
+import { Eye, FileSpreadsheet, LayoutDashboard, Shield, Upload } from "lucide-react";
 import { auth } from "@/auth";
 import { ShortcutSpecialCharMenu } from "@/components/shortcut-special-char-menu";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -8,12 +8,17 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
 const links = [
-	{ href: "/", label: "ALT 작성 및 검수", icon: Upload },
+	{ href: "/", label: "ALT 작성", icon: Upload },
+	{ href: "/inspection", label: "ALT 검수", icon: Eye },
 	// { href: "/admin/ip-allowlist", label: "IP 관리", icon: Shield },
 	// { href: "/admin/audit-logs", label: "활동 로그", icon: LayoutDashboard },
 ] as const;
 
-export async function SiteHeader() {
+type SiteHeaderProps = {
+	tutorialHref?: string;
+};
+
+export async function SiteHeader({ tutorialHref = "/?tutorial=1" }: SiteHeaderProps) {
 	const session = await auth();
 
 	return (
@@ -37,7 +42,7 @@ export async function SiteHeader() {
 					</nav>
 					<div className="mx-0.5 hidden h-6 w-px bg-border sm:block" aria-hidden />
 					<ThemeToggle />
-					<Link href="/?tutorial=1" className={cn(buttonVariants({ variant: "default", size: "sm" }), "h-8 tracking-wide no-underline")}>
+					<Link href={tutorialHref} className={cn(buttonVariants({ variant: "default", size: "sm" }), "h-8 tracking-wide no-underline")}>
 						TUTORIAL
 					</Link>
 					{session?.user ? (
