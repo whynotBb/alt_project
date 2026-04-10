@@ -82,6 +82,7 @@ export function AltInspectionWorkspace() {
 	const [dropActive, setDropActive] = useState(false);
 	const [commentsByImage, setCommentsByImage] = useState<Record<string, ReviewComment[]>>({});
 	const excelAltRef = useRef<HTMLDivElement | null>(null);
+	const commentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const [selectionTooltip, setSelectionTooltip] = useState<{ selectedText: string; x: number; y: number } | null>(null);
 	const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
 	const [commentDraft, setCommentDraft] = useState("");
@@ -145,6 +146,14 @@ export function AltInspectionWorkspace() {
 		setSelectionRange(null);
 		setCommentDraft("");
 	}, [selectedId]);
+
+	useEffect(() => {
+		if (!selectionTooltip) return;
+		const id = window.setTimeout(() => {
+			commentTextareaRef.current?.focus();
+		}, 0);
+		return () => window.clearTimeout(id);
+	}, [selectionTooltip]);
 
 	useEffect(() => {
 		const t = searchParams.get("tutorial");
@@ -805,7 +814,13 @@ export function AltInspectionWorkspace() {
 					{selectionTooltip ? (
 						<div className="fixed z-30 w-72 rounded-lg border border-border bg-popover p-2 shadow-xl" style={{ left: selectionTooltip.x, top: selectionTooltip.y }}>
 							<p className="mb-1 text-[11px] leading-snug text-muted-foreground">선택 영역: &quot;{selectionTooltip.selectedText}&quot;</p>
-							<textarea value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="수정 사항 코멘트 입력" className="h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+							<textarea
+								ref={commentTextareaRef}
+								value={commentDraft}
+								onChange={(e) => setCommentDraft(e.target.value)}
+								placeholder="수정 사항 코멘트 입력"
+								className="h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							/>
 							<div className="mt-1.5 flex justify-end gap-1.5">
 								<Button
 									type="button"
