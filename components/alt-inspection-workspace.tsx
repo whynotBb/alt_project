@@ -99,6 +99,7 @@ export function AltInspectionWorkspace() {
 	const excludedCount = items.filter((i) => i.excludedFromTarget).length;
 	const total = items.length;
 	const progressPct = reviewTargetCount > 0 ? Math.round((decidedCount / reviewTargetCount) * 100) : 0;
+	const canDownloadInspectionReport = items.length > 0 && items.every((it) => it.excludedFromTarget || it.outcome === "pass" || it.outcome === "fail");
 
 	const itemsRef = useRef<InspectionItem[]>([]);
 	itemsRef.current = items;
@@ -724,7 +725,7 @@ export function AltInspectionWorkspace() {
 						)}
 					</div>
 					<div className="shrink-0 border-t border-border/80 bg-card/90 p-2">
-						<Button type="button" data-tutorial="inspection-download-report" variant="secondary" className="w-full gap-2" onClick={handleDownloadInspectionReport} disabled={items.length === 0}>
+						<Button type="button" data-tutorial="inspection-download-report" variant="secondary" className="w-full gap-2" onClick={handleDownloadInspectionReport} disabled={!canDownloadInspectionReport}>
 							<Download className="size-4 shrink-0" aria-hidden />
 							검수 결과 다운로드
 						</Button>
