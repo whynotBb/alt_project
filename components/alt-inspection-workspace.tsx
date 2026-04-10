@@ -533,93 +533,96 @@ export function AltInspectionWorkspace() {
 		URL.revokeObjectURL(url);
 	}, [commentsByImage, excelAltByPath, excelSourceFileName, itemNames, items]);
 
-	const handleJoyrideEvent = useCallback((data: EventData) => {
-		const afterCommit = (fn: () => void) => {
-			queueMicrotask(fn);
-		};
+	const handleJoyrideEvent = useCallback(
+		(data: EventData) => {
+			const afterCommit = (fn: () => void) => {
+				queueMicrotask(fn);
+			};
 
-		if (data.type === EVENTS.TOUR_START) {
-			joyrideTutorialActiveRef.current = true;
-			if (itemsRef.current.length === 0) {
+			if (data.type === EVENTS.TOUR_START) {
+				joyrideTutorialActiveRef.current = true;
+				if (itemsRef.current.length === 0) {
+					const demoId = "inspection-tutorial-1";
+					setItems([
+						{
+							id: demoId,
+							name: "tutorial_1.png",
+							url: "/tutorial_1.png",
+							htmlAlt: INSPECTION_TUTORIAL_DEMO_TEXT,
+							excludedFromTarget: false,
+							outcome: "pending",
+						},
+					]);
+					setSelectedId(demoId);
+					setExcelAltByPath(new Map([[pathLabelLookupKey("tutorial_1.png"), INSPECTION_TUTORIAL_DEMO_TEXT]]));
+					setTutorialInjected(true);
+				}
+				return;
+			}
+
+			if (data.type === EVENTS.STEP_BEFORE && tutorialInjected) {
 				const demoId = "inspection-tutorial-1";
-				setItems([
-					{
-						id: demoId,
-						name: "tutorial_1.png",
-						url: "/tutorial_1.png",
-						htmlAlt: INSPECTION_TUTORIAL_DEMO_TEXT,
-						excludedFromTarget: false,
-						outcome: "pending",
-					},
-				]);
-				setSelectedId(demoId);
-				setExcelAltByPath(new Map([[pathLabelLookupKey("tutorial_1.png"), INSPECTION_TUTORIAL_DEMO_TEXT]]));
-				setTutorialInjected(true);
-			}
-			return;
-		}
-
-		if (data.type === EVENTS.STEP_BEFORE && tutorialInjected) {
-			const demoId = "inspection-tutorial-1";
-			if (data.index === 4) {
-				// Step 5: 엑셀 ALT에서 드래그 + 코멘트 툴팁 열린 상태
-				afterCommit(() => {
-					const sample = "대체텍스트";
-					const start = INSPECTION_TUTORIAL_DEMO_TEXT.indexOf(sample);
-					if (start >= 0) {
-						setSelectionRange({ start, end: start + sample.length });
-					}
-					const rect = excelAltRef.current?.getBoundingClientRect();
-					setSelectionTooltip({
-						selectedText: sample,
-						x: rect ? Math.min(window.innerWidth - 300, rect.left + 24) : 240,
-						y: rect ? rect.top + 90 : 220,
+				if (data.index === 4) {
+					// Step 5: 엑셀 ALT에서 드래그 + 코멘트 툴팁 열린 상태
+					afterCommit(() => {
+						const sample = "대체텍스트";
+						const start = INSPECTION_TUTORIAL_DEMO_TEXT.indexOf(sample);
+						if (start >= 0) {
+							setSelectionRange({ start, end: start + sample.length });
+						}
+						const rect = excelAltRef.current?.getBoundingClientRect();
+						setSelectionTooltip({
+							selectedText: sample,
+							x: rect ? Math.min(window.innerWidth - 300, rect.left + 24) : 240,
+							y: rect ? rect.top + 90 : 220,
+						});
+						setCommentDraft("해당 문구를 좀 더 구체적으로 보완해 주세요.");
 					});
-					setCommentDraft("해당 문구를 좀 더 구체적으로 보완해 주세요.");
-				});
+				}
+				if (data.index === 5) {
+					// Step 6: 검수 코멘트 예시
+					afterCommit(() => {
+						setSelectionTooltip(null);
+						setCommentDraft("");
+						setCommentsByImage((prev) => ({
+							...prev,
+							[demoId]: [
+								{
+									id: "inspection-tutorial-comment-1",
+									imageName: "tutorial_1.png",
+									status: "FAIL",
+									selectedText: "대체텍스트",
+									note: "문맥상 핵심 정보가 부족합니다. 상품 핵심 문구를 포함해 주세요.",
+								},
+							],
+						}));
+					});
+				}
+				if (data.index === 6) {
+					// Step 7: 진행률 1건 완료 상태
+					afterCommit(() => {
+						setItems((prev) => prev.map((it) => (it.id === demoId ? { ...it, outcome: "pass" } : it)));
+					});
+				}
 			}
-			if (data.index === 5) {
-				// Step 6: 검수 코멘트 예시
-				afterCommit(() => {
+
+			if (data.type === EVENTS.TOUR_END || (data.type === EVENTS.TOUR_STATUS && (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED))) {
+				joyrideTutorialActiveRef.current = false;
+				setRunTutorialJoyride(false);
+				if (tutorialInjected) {
+					setItems([]);
+					setSelectedId(null);
+					setExcelAltByPath(new Map());
+					setCommentsByImage({});
+					setSelectionRange(null);
 					setSelectionTooltip(null);
 					setCommentDraft("");
-					setCommentsByImage((prev) => ({
-						...prev,
-						[demoId]: [
-							{
-								id: "inspection-tutorial-comment-1",
-								imageName: "tutorial_1.png",
-								status: "FAIL",
-								selectedText: "대체텍스트",
-								note: "문맥상 핵심 정보가 부족합니다. 상품 핵심 문구를 포함해 주세요.",
-							},
-						],
-					}));
-				});
+					setTutorialInjected(false);
+				}
 			}
-			if (data.index === 6) {
-				// Step 7: 진행률 1건 완료 상태
-				afterCommit(() => {
-					setItems((prev) => prev.map((it) => (it.id === demoId ? { ...it, outcome: "pass" } : it)));
-				});
-			}
-		}
-
-		if (data.type === EVENTS.TOUR_END || (data.type === EVENTS.TOUR_STATUS && (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED))) {
-			joyrideTutorialActiveRef.current = false;
-			setRunTutorialJoyride(false);
-			if (tutorialInjected) {
-				setItems([]);
-				setSelectedId(null);
-				setExcelAltByPath(new Map());
-				setCommentsByImage({});
-				setSelectionRange(null);
-				setSelectionTooltip(null);
-				setCommentDraft("");
-				setTutorialInjected(false);
-			}
-		}
-	}, [tutorialInjected]);
+		},
+		[tutorialInjected],
+	);
 
 	const listRows = useMemo(
 		() =>
@@ -736,7 +739,7 @@ export function AltInspectionWorkspace() {
 					<header className="shrink-0 border-b border-border/80 bg-card/95 px-4 py-3 backdrop-blur-sm sm:px-5">
 						<div className="min-w-0">
 							<h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">ALT 검수</h1>
-							<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">HTML의 alt와 엑셀 대체텍스트를 비교한 뒤 Pass 또는 Fail로 표시합니다. 텍스트 영역은 textarea가 아닌 편집 가능한 블록·읽기 전용 블록으로 표시됩니다.</p>
+							<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">HTML의 alt와 엑셀 대체텍스트를 비교한 뒤 Pass 또는 Fail로 표시합니다. 수정사항은 문장을 드래그 하신 후 코멘트를 작성해주세요.</p>
 							<Button type="button" variant="outline" size="sm" className="mt-2 h-7 text-xs" onClick={() => setRunTutorialJoyride(true)}>
 								튜토리얼
 							</Button>
@@ -815,13 +818,7 @@ export function AltInspectionWorkspace() {
 					{selectionTooltip ? (
 						<div className="fixed z-30 w-72 rounded-lg border border-border bg-popover p-2 shadow-xl" style={{ left: selectionTooltip.x, top: selectionTooltip.y }}>
 							<p className="mb-1 text-[11px] leading-snug text-muted-foreground">선택 영역: &quot;{selectionTooltip.selectedText}&quot;</p>
-							<textarea
-								ref={commentTextareaRef}
-								value={commentDraft}
-								onChange={(e) => setCommentDraft(e.target.value)}
-								placeholder="수정 사항 코멘트 입력"
-								className="h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							/>
+							<textarea ref={commentTextareaRef} value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="수정 사항 코멘트 입력" className="h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring" />
 							<div className="mt-1.5 flex justify-end gap-1.5">
 								<Button
 									type="button"
