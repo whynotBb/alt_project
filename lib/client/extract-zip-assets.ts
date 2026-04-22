@@ -7,6 +7,43 @@ export const MAX_HTML_ENTRIES = 200;
 export type ExtractedZipImage = { relativePath: string; blob: Blob };
 export type ExtractedZipHtml = { relativePath: string; content: string };
 
+function detectZipContentRootPrefix(allFilePaths: string[]): string {
+  if (allFilePaths.length === 0) return "";
+  const normalized = allFilePaths.map((p) => p.replace(/\\/g, "/").replace(/^\/+/, ""));
+  if (normalized.some((p) => !p.includes("/"))) return "";
+
+  let prefix = "";
+  while (true) {
+    const underPrefix = normalized.filter((p) => p.startsWith(prefix));
+    if (underPrefix.length === 0) return "";
+
+    const seenDirs = new Set<string>();
+    const immediateFiles: string[] = [];
+    for (const full of underPrefix) {
+      const rest = full.slice(prefix.length);
+      if (!rest) continue;
+      const slash = rest.indexOf("/");
+      if (slash < 0) {
+        immediateFiles.push(rest);
+      } else {
+        seenDirs.add(rest.slice(0, slash));
+      }
+    }
+
+    const hasHtmlAtThisLevel = immediateFiles.some((name) => HTML_EXT.test(name));
+    if (hasHtmlAtThisLevel) return prefix;
+    if (immediateFiles.length > 0 || seenDirs.size !== 1) return "";
+
+    const [onlyDir] = [...seenDirs];
+    prefix = `${prefix}${onlyDir}/`;
+  }
+}
+
+function trimPrefix(p: string, prefix: string): string {
+  if (!prefix) return p;
+  return p.startsWith(prefix) ? p.slice(prefix.length) : p;
+}
+
 function mimeForImagePath(p: string): string {
   const lower = p.toLowerCase();
   if (lower.endsWith(".png")) return "image/png";
@@ -23,12 +60,17 @@ export async function extractZipAssets(file: File): Promise<{
   htmlFiles: ExtractedZipHtml[];
 }> {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const allFilePaths = Object.entries(zip.files)
+    .filter(([, entry]) => !entry.dir)
+    .map(([entryPath]) => entryPath.replace(/\\/g, "/"));
+  const contentRootPrefix = detectZipContentRootPrefix(allFilePaths);
+
   const images: ExtractedZipImage[] = [];
   const htmlFiles: ExtractedZipHtml[] = [];
 
   for (const [path, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
-    const posix = path.replace(/\\/g, "/");
+    const posix = trimPrefix(path.replace(/\\/g, "/"), contentRootPrefix);
     if (HTML_EXT.test(posix)) {
       if (htmlFiles.length >= MAX_HTML_ENTRIES) continue;
       const content = await entry.async("string");

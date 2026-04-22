@@ -1,9 +1,20 @@
 import ExcelJS from "exceljs";
 import { decode } from "html-entities";
+import { normalizeZipRelativePath } from "@/lib/client/resolve-html-img-src";
 
 /** 엑셀 C열 경로 표기와 이미지 `name` 매칭용 키 */
 export function pathLabelLookupKey(pathLabel: string): string {
-	return pathLabel.replace(/\\/g, "/").trim().toLowerCase();
+	const raw = pathLabel.trim();
+	if (!raw) return "";
+	const noHash = raw.split("#")[0] ?? raw;
+	const noQuery = noHash.split("?")[0] ?? noHash;
+	let decoded = noQuery;
+	try {
+		decoded = decodeURIComponent(noQuery);
+	} catch {
+		/* keep raw */
+	}
+	return normalizeZipRelativePath(decoded.replace(/^\/+/, ""));
 }
 
 function cellToPlainString(cell: ExcelJS.Cell): string {
@@ -34,6 +45,16 @@ export function extractAltFromImgTagCell(htmlOrTag: string): string {
 	return decode(altM[2] ?? "").trim();
 }
 
+function extractSrcFromImgTagCell(htmlOrTag: string): string {
+	const s = htmlOrTag.trim();
+	if (!s) return "";
+	const m = s.match(/<img\b[^>]*>/i);
+	const tag = m ? m[0] : s;
+	const srcM = tag.match(/\bsrc\s*=\s*(["'])([\s\S]*?)\1/i);
+	if (!srcM) return "";
+	return decode(srcM[2] ?? "").trim();
+}
+
 /**
  * ALT 작성 산출물 엑셀(시트 `산출물` 또는 첫 시트)에서
  * C열 경로 → `pathLabelLookupKey` → 대체텍스트(alt) 맵을 만듭니다.
@@ -55,8 +76,15 @@ export async function parseAltReviewDeliverableExcel(file: File): Promise<Map<st
 		const pathRaw = cellToPlainString(pathCell).trim();
 		const dRaw = cellToPlainString(imgCell);
 		const alt = extractAltFromImgTagCell(dRaw);
-		if (pathRaw) {
-			map.set(pathLabelLookupKey(pathRaw), alt);
+		const srcRaw = extractSrcFromImgTagCell(dRaw);
+		const srcKey = pathLabelLookupKey(srcRaw);
+		if (srcKey) {
+			map.set(srcKey, alt);
+		}
+		const pathKey = pathLabelLookupKey(pathRaw);
+		if (pathKey) {
+			// C열 경로를 우선키로 간주해 동일 키가 있으면 덮어쓴다.
+			map.set(pathKey, alt);
 		}
 		row += 2;
 	}

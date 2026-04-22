@@ -30,22 +30,35 @@ export async function listAllFiles(root: string): Promise<string[]> {
  * 압축 루트에 파일이 없고 하위에 단일 폴더만 있으면 그 폴더를 사이트 루트로 본다.
  * - index.html + images/ 가 ZIP 루트에 바로 있는 경우 → extractRoot 그대로
  * - project/index.html 만 있는 경우 → project/ 가 콘텐츠 루트
+ * - 루트에 html이 없고 단일 폴더 체인만 있으면 html이 나올 때까지 내려간다.
  */
 export function detectContentRoot(extractRoot: string, absoluteFilePaths: string[]): string {
-  const rels = absoluteFilePaths
-    .map((f) => path.relative(extractRoot, f))
-    .filter((r) => r.length > 0 && !r.startsWith(".."));
-  const directlyUnderExtract = rels.filter((r) => !r.includes(path.sep));
-  if (directlyUnderExtract.length > 0) {
-    return extractRoot;
+  let candidateRoot = extractRoot;
+  while (true) {
+    const rels = absoluteFilePaths
+      .map((f) => path.relative(candidateRoot, f))
+      .filter((r) => r.length > 0 && !r.startsWith(".."));
+
+    if (rels.length === 0) return extractRoot;
+
+    const immediateFiles = rels.filter((r) => !r.includes(path.sep));
+    const hasHtmlAtThisLevel = immediateFiles.some((name) => HTML_EXT.test(name));
+    if (hasHtmlAtThisLevel) return candidateRoot;
+
+    // 파일이 하나라도 있으면 더 이상 자동으로 하위 폴더를 강제하지 않는다.
+    if (immediateFiles.length > 0) return candidateRoot;
+
+    const firstSegs = new Set(
+      rels.map((r) => r.split(path.sep)[0]).filter((s): s is string => Boolean(s)),
+    );
+    if (firstSegs.size !== 1) return candidateRoot;
+
+    const [onlyDir] = [...firstSegs];
+    if (!onlyDir) return candidateRoot;
+    const nextRoot = path.join(candidateRoot, onlyDir);
+    if (nextRoot === candidateRoot) return candidateRoot;
+    candidateRoot = nextRoot;
   }
-  const firstSegs = new Set(
-    rels.map((r) => r.split(path.sep)[0]).filter((s): s is string => Boolean(s)),
-  );
-  if (firstSegs.size === 1) {
-    return path.join(extractRoot, [...firstSegs][0]);
-  }
-  return extractRoot;
 }
 
 /** extractRoot 기준 posix 상대 경로 (표시용) */

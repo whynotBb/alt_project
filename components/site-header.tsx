@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Eye, FileSpreadsheet, LayoutDashboard, Shield, Upload } from "lucide-react";
+import { Eye, FileSpreadsheet, GitCompare, Images, Upload } from "lucide-react";
 import { auth } from "@/auth";
 import { ShortcutSpecialCharMenu } from "@/components/shortcut-special-char-menu";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 const links = [
 	{ href: "/", label: "ALT 작성", icon: Upload },
 	{ href: "/inspection", label: "ALT 검수", icon: Eye },
+	// { href: "/comparator", label: "텍스트 대조", icon: GitCompare },
+	{ href: "/image-compare", label: "이미지 대조", icon: Images },
 	// { href: "/admin/ip-allowlist", label: "IP 관리", icon: Shield },
 	// { href: "/admin/audit-logs", label: "활동 로그", icon: LayoutDashboard },
 ] as const;
