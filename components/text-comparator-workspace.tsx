@@ -72,7 +72,7 @@ function extractHtmlTextWithAlt(html: string): string {
 	};
 
 	const walker = doc.createTreeWalker(body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
-	let node = walker.currentNode;
+	let node: Node | null = walker.currentNode;
 	while (node) {
 		if (!isIgnoredContext(node)) {
 			if (node.nodeType === Node.ELEMENT_NODE) {
