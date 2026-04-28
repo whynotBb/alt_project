@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Check, X } from "lucide-react";
+import { Check, RotateCcw, X } from "lucide-react";
 import { type RowComponentProps } from "react-window";
 import { cn } from "@/lib/utils";
 import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
@@ -24,6 +24,7 @@ export type ImageListRowData = {
 	itemNames: string[];
 	selectedId: string | null;
 	onSelect: (id: string) => void;
+	onUndoExclude?: (id: string) => void;
 	variant: ImageListRowVariant;
 };
 
@@ -65,24 +66,37 @@ export function ImageListRow({ index, style, ...data }: RowComponentProps<ImageL
 
 	return (
 		<div style={style} className="pb-1">
-			<button
-				type="button"
-				data-item-id={it.id}
-				onClick={() => data.onSelect(it.id)}
+			<div
 				className={cn(
 					"flex h-[48px] w-full items-center gap-2 rounded-xl border border-transparent px-2 text-left text-sm transition-colors",
 					isActive ? "border-primary/25 bg-sky-50 shadow-sm dark:bg-sky-950/40" : it.excludedFromTarget ? "text-muted-foreground opacity-80 hover:bg-muted/70" : "text-foreground hover:bg-muted/70",
 				)}
 			>
-				<span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-muted/40" aria-hidden>
-					{/* eslint-disable-next-line @next/next/no-img-element */}
-					<img src={it.url} alt="" className="size-full object-cover" />
-				</span>
-				<span className="min-w-0 flex-1 truncate font-medium" title={it.name !== listLabel ? `${listLabel} — ${it.name}` : it.name}>
-					{listLabel}
-				</span>
-				{statusIcon}
-			</button>
+				<button type="button" data-item-id={it.id} onClick={() => data.onSelect(it.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+					<span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-muted/40" aria-hidden>
+						{/* eslint-disable-next-line @next/next/no-img-element */}
+						<img src={it.url} alt="" className="size-full object-cover" />
+					</span>
+					<span className="min-w-0 flex-1 truncate font-medium" title={it.name !== listLabel ? `${listLabel} — ${it.name}` : it.name}>
+						{listLabel}
+					</span>
+					{statusIcon}
+				</button>
+				{it.excludedFromTarget && data.onUndoExclude ? (
+					<button
+						type="button"
+						className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background/80 px-1.5 text-[11px] font-medium text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+						onClick={(e) => {
+							e.stopPropagation();
+							data.onUndoExclude?.(it.id);
+						}}
+						aria-label={`${listLabel} 대상 제외 취소`}
+					>
+						<RotateCcw className="size-3" aria-hidden />
+						취소
+					</button>
+				) : null}
+			</div>
 		</div>
 	);
 }

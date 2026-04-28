@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Joyride, EVENTS, STATUS, type EventData } from "react-joyride";
-import { Ban, Check, Download, Loader2, Trash2, Upload, X } from "lucide-react";
+import { Ban, Check, Download, Loader2, SpellCheck2, Trash2, Upload, X } from "lucide-react";
 import { List, type ListImperativeAPI } from "react-window";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -15,10 +15,94 @@ import { pathLabelLookupKey, parseAltReviewDeliverableExcel } from "@/lib/client
 import { ImageListRow } from "@/components/image-list-row";
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
 import { EditablePlainText } from "@/components/editable-plain-text";
+import { SpellDiffPreview } from "@/components/spell-diff-preview";
 import { getInspectionTutorialSteps, INSPECTION_TUTORIAL_DEMO_TEXT } from "@/lib/tutorial-inspection-joyride-steps";
+import type { SpellHit } from "@/types/spell-hit";
 
 const MAX_IMAGES = 200;
 const LIST_ITEM_HEIGHT = 52;
+const SPELL_PREVIEW_MIN_H = 88;
+const SPELL_PREVIEW_DEFAULT_H = 176;
+
+function clampSpellPreviewHeight(px: number): number {
+	const max = typeof window !== "undefined" ? Math.min(560, Math.round(window.innerHeight * 0.7)) : 560;
+	return Math.round(Math.max(SPELL_PREVIEW_MIN_H, Math.min(max, px)));
+}
+
+type DiffLine = {
+	text: string;
+	changed: boolean;
+	start: number;
+	end: number;
+};
+
+function splitLinesForDiff(text: string): string[] {
+	return text.replace(/\r\n?/g, "\n").split("\n");
+}
+
+function buildLineDiff(leftText: string, rightText: string): { left: DiffLine[]; right: DiffLine[] } {
+	const leftLines = splitLinesForDiff(leftText);
+	const rightLines = splitLinesForDiff(rightText);
+	const rows = Math.max(leftLines.length, rightLines.length);
+	let leftCursor = 0;
+	let rightCursor = 0;
+	return {
+		left: Array.from({ length: rows }, (_, index) => {
+			const text = leftLines[index] ?? "";
+			const start = leftCursor;
+			const end = start + text.length;
+			leftCursor = end + (index < leftLines.length - 1 ? 1 : 0);
+			return {
+				text,
+				changed: text !== (rightLines[index] ?? ""),
+				start,
+				end,
+			};
+		}),
+		right: Array.from({ length: rows }, (_, index) => {
+			const text = rightLines[index] ?? "";
+			const start = rightCursor;
+			const end = start + text.length;
+			rightCursor = end + (index < rightLines.length - 1 ? 1 : 0);
+			return {
+				text,
+				changed: (leftLines[index] ?? "") !== text,
+				start,
+				end,
+			};
+		}),
+	};
+}
+
+function DiffLineText({ line, activeRange }: { line: DiffLine; activeRange?: SelectionRange | null }) {
+	const overlapStart = activeRange ? Math.max(line.start, activeRange.start) : line.end;
+	const overlapEnd = activeRange ? Math.min(line.end, activeRange.end) : line.start;
+	if (!activeRange || overlapEnd <= overlapStart) return <>{line.text || " "}</>;
+
+	const localStart = overlapStart - line.start;
+	const localEnd = overlapEnd - line.start;
+	return (
+		<>
+			{line.text.slice(0, localStart)}
+			<mark className="box-decoration-clone rounded bg-emerald-200/80 px-0.5 text-inherit dark:bg-emerald-700/50">{line.text.slice(localStart, localEnd) || " "}</mark>
+			{line.text.slice(localEnd)}
+		</>
+	);
+}
+
+function DiffTextBlock({ lines, emptyText, activeRange }: { lines: DiffLine[]; emptyText: string; activeRange?: SelectionRange | null }) {
+	const hasText = lines.some((line) => line.text.trim().length > 0);
+	if (!hasText) return <span className="text-muted-foreground">{emptyText}</span>;
+	return (
+		<div className="space-y-1">
+			{lines.map((line, index) => (
+				<div key={index} className={cn("min-h-[1.5em] rounded px-1.5 py-0.5", line.changed && "bg-amber-200/70 text-foreground dark:bg-amber-700/35")}>
+					<DiffLineText line={line} activeRange={activeRange} />
+				</div>
+			))}
+		</div>
+	);
+}
 
 type InspectionItem = {
 	id: string;
@@ -80,10 +164,16 @@ export function AltInspectionWorkspace() {
 	const [isParsingExcel, setIsParsingExcel] = useState(false);
 	const [sideNotice, setSideNotice] = useState<string | null>(null);
 	const [dropActive, setDropActive] = useState(false);
+	const [excelSpellLoading, setExcelSpellLoading] = useState(false);
+	const [excelSpellHits, setExcelSpellHits] = useState<SpellHit[]>([]);
+	const [excelSpellBaseline, setExcelSpellBaseline] = useState<string | null>(null);
+	const [excelSpellPreviewHeightPx, setExcelSpellPreviewHeightPx] = useState(SPELL_PREVIEW_DEFAULT_H);
+	const excelSpellPreviewResizeRef = useRef<{ pointerId: number; startY: number; startH: number } | null>(null);
+	const [diffActive, setDiffActive] = useState(false);
 	const [commentsByImage, setCommentsByImage] = useState<Record<string, ReviewComment[]>>({});
 	const excelAltRef = useRef<HTMLDivElement | null>(null);
 	const commentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-	const [selectionTooltip, setSelectionTooltip] = useState<{ selectedText: string; x: number; y: number } | null>(null);
+	const [selectionTooltip, setSelectionTooltip] = useState<{ selectedText: string; range: SelectionRange; x: number; y: number } | null>(null);
 	const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
 	const [commentDraft, setCommentDraft] = useState("");
 	const [excelSourceFileName, setExcelSourceFileName] = useState<string>("");
@@ -92,6 +182,8 @@ export function AltInspectionWorkspace() {
 	const itemNames = useMemo(() => items.map((i) => i.name), [items]);
 	const selectedDeliverableLabel = useMemo(() => (selected ? excelDeliverableImagePathLabel(selected.name, itemNames) : null), [selected, itemNames]);
 	const selectedExcelAlt = useMemo(() => (selected ? excelAltForItem(selected.name, itemNames, excelAltByPath) : ""), [selected, itemNames, excelAltByPath]);
+	const altDiff = useMemo(() => buildLineDiff(selected?.htmlAlt ?? "", selectedExcelAlt), [selected?.htmlAlt, selectedExcelAlt]);
+	const activeCommentRange = selectionTooltip?.range ?? selectionRange;
 	const selectedComments = selected ? (commentsByImage[selected.id] ?? []) : [];
 
 	const reviewTargetCount = items.filter((i) => !i.excludedFromTarget).length;
@@ -146,7 +238,16 @@ export function AltInspectionWorkspace() {
 		setSelectionTooltip(null);
 		setSelectionRange(null);
 		setCommentDraft("");
+		setExcelSpellHits([]);
+		setExcelSpellBaseline(null);
 	}, [selectedId]);
+
+	useEffect(() => {
+		if (excelSpellBaseline !== null && selectedExcelAlt !== excelSpellBaseline) {
+			setExcelSpellHits([]);
+			setExcelSpellBaseline(null);
+		}
+	}, [excelSpellBaseline, selectedExcelAlt]);
 
 	useEffect(() => {
 		if (!selectionTooltip) return;
@@ -305,6 +406,11 @@ export function AltInspectionWorkspace() {
 		});
 	}, [selectedId]);
 
+	const handleUndoExcludeFromTarget = useCallback((id: string) => {
+		setItems((prev) => prev.map((it) => (it.id === id ? { ...it, excludedFromTarget: false, outcome: "pending" as const } : it)));
+		setSelectedId(id);
+	}, []);
+
 	const handlePass = useCallback(() => {
 		if (!selectedId) return;
 		setItems((prev) => {
@@ -336,6 +442,68 @@ export function AltInspectionWorkspace() {
 			return next;
 		});
 	}, [selectedId]);
+
+	const handleExcelSpellCheck = useCallback(async () => {
+		if (!selected || selected.excludedFromTarget || selectedExcelAlt.trim().length === 0) return;
+		setExcelSpellLoading(true);
+		setSideNotice(null);
+		try {
+			const res = await fetch("/api/spell-check", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ text: selectedExcelAlt }),
+			});
+			const data = (await res.json()) as { ok?: boolean; hits?: SpellHit[]; message?: string };
+			if (!res.ok || !data.ok) {
+				setSideNotice(typeof data.message === "string" ? data.message : "맞춤법 검사에 실패했습니다.");
+				setExcelSpellHits([]);
+				setExcelSpellBaseline(null);
+				return;
+			}
+			setExcelSpellBaseline(selectedExcelAlt);
+			setExcelSpellHits(Array.isArray(data.hits) ? data.hits : []);
+		} catch {
+			setSideNotice("맞춤법 검사 요청 중 오류가 났습니다.");
+			setExcelSpellHits([]);
+			setExcelSpellBaseline(null);
+		} finally {
+			setExcelSpellLoading(false);
+		}
+	}, [selected, selectedExcelAlt]);
+
+	const excelSpellPreviewActive = selected && excelSpellBaseline !== null && selectedExcelAlt === excelSpellBaseline;
+
+	const onExcelSpellPreviewResizePointerDown = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			e.preventDefault();
+			excelSpellPreviewResizeRef.current = {
+				pointerId: e.pointerId,
+				startY: e.clientY,
+				startH: excelSpellPreviewHeightPx,
+			};
+			e.currentTarget.setPointerCapture(e.pointerId);
+		},
+		[excelSpellPreviewHeightPx],
+	);
+
+	const onExcelSpellPreviewResizePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		const d = excelSpellPreviewResizeRef.current;
+		if (!d || e.pointerId !== d.pointerId) return;
+		const delta = e.clientY - d.startY;
+		setExcelSpellPreviewHeightPx(clampSpellPreviewHeight(d.startH - delta));
+	}, []);
+
+	const onExcelSpellPreviewResizePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		const d = excelSpellPreviewResizeRef.current;
+		if (d && e.pointerId === d.pointerId) {
+			excelSpellPreviewResizeRef.current = null;
+			try {
+				e.currentTarget.releasePointerCapture(e.pointerId);
+			} catch {
+				/* already released */
+			}
+		}
+	}, []);
 
 	const openFilePicker = useCallback(() => {
 		inputRef.current?.click();
@@ -407,6 +575,7 @@ export function AltInspectionWorkspace() {
 		setSelectionRange(offsets);
 		setSelectionTooltip({
 			selectedText,
+			range: offsets,
 			x: Math.max(margin, Math.min(viewportW - tipW - margin, rect.left)),
 			y: rect.bottom + 6,
 		});
@@ -573,6 +742,7 @@ export function AltInspectionWorkspace() {
 						const rect = excelAltRef.current?.getBoundingClientRect();
 						setSelectionTooltip({
 							selectedText: sample,
+							range: { start, end: start + sample.length },
 							x: rect ? Math.min(window.innerWidth - 300, rect.left + 24) : 240,
 							y: rect ? rect.top + 90 : 220,
 						});
@@ -723,7 +893,7 @@ export function AltInspectionWorkspace() {
 							<p className="px-1 py-4 text-center text-sm text-muted-foreground">퍼블리싱 ZIP과 대체텍스트 엑셀(xlsx)을 추가하면 목록이 표시됩니다.</p>
 						) : (
 							<div className="min-h-0 h-full">
-								<List rowCount={items.length} rowHeight={LIST_ITEM_HEIGHT} rowComponent={ImageListRow} rowProps={{ items: listRows, itemNames, selectedId, onSelect: setSelectedId, variant: "inspection" }} listRef={listRef} defaultHeight={320} style={{ height: "100%" }} />
+								<List rowCount={items.length} rowHeight={LIST_ITEM_HEIGHT} rowComponent={ImageListRow} rowProps={{ items: listRows, itemNames, selectedId, onSelect: setSelectedId, onUndoExclude: handleUndoExcludeFromTarget, variant: "inspection" }} listRef={listRef} defaultHeight={320} style={{ height: "100%" }} />
 							</div>
 						)}
 					</div>
@@ -760,20 +930,53 @@ export function AltInspectionWorkspace() {
 							</div>
 							<div className="flex min-h-0 flex-1 flex-col p-4">{selected ? <ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} /> : <p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">ZIP을 추가한 뒤 목록에서 항목을 선택해 주세요.</p>}</div>
 						</div>
-						<div className="flex w-full min-h-[200px] flex-col lg:min-h-0" data-tutorial="inspection-html-alt">
-							<div className="shrink-0 border-b border-border/80 bg-muted/30 px-3 py-2">
+						<div className="relative flex w-full min-h-[200px] flex-col lg:min-h-0" data-tutorial="inspection-html-alt">
+							<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
 								<Label htmlFor="html-alt-edit" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
 									HTML에 매칭된 img의 alt
 								</Label>
+								<Button
+									type="button"
+									variant={diffActive ? "secondary" : "ghost"}
+									size="sm"
+									className="h-7 gap-1 px-2 text-xs"
+									disabled={!selected || selected.excludedFromTarget}
+									aria-pressed={diffActive}
+									onClick={() => setDiffActive((v) => !v)}
+									title="HTML ALT와 엑셀 대체텍스트의 다른 줄을 표시합니다"
+								>
+									비교
+								</Button>
 							</div>
-							<EditablePlainText key={selectedId ?? "none"} id="html-alt-edit" value={selected?.htmlAlt ?? ""} onChange={updateSelectedHtmlAlt} disabled={!selected || selected.excludedFromTarget} placeholder={!selected ? "이미지를 선택하세요." : selected.excludedFromTarget ? "대상에서 제외된 이미지입니다." : "HTML alt가 없으면 직접 입력할 수 있습니다."} className="min-h-[120px] lg:min-h-0" />
+							{diffActive ? (
+								<div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap wrap-break-word border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground">
+									<DiffTextBlock lines={altDiff.left} emptyText={!selected ? "이미지를 선택하세요." : selected.excludedFromTarget ? "대상에서 제외된 이미지입니다." : "HTML alt가 비어 있습니다."} />
+								</div>
+							) : (
+								<EditablePlainText key={selectedId ?? "none"} id="html-alt-edit" value={selected?.htmlAlt ?? ""} onChange={updateSelectedHtmlAlt} disabled={!selected || selected.excludedFromTarget} placeholder={!selected ? "이미지를 선택하세요." : selected.excludedFromTarget ? "대상에서 제외된 이미지입니다." : "HTML alt가 없으면 직접 입력할 수 있습니다."} className="min-h-[120px] lg:min-h-0" />
+							)}
 						</div>
 						<div className="relative flex h-full w-full min-h-[200px] flex-col lg:min-h-0" data-tutorial="inspection-excel-alt">
-							<div className="shrink-0 border-b border-border/80 bg-muted/30 px-3 py-2">
+							<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
 								<div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">엑셀 산출물에서 경로로 매칭된 대체텍스트</div>
+								<div className="flex shrink-0 items-center gap-1">
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-7 gap-1 px-2 text-xs text-amber-800 hover:bg-amber-500/10 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-200"
+										disabled={!selected || selected.excludedFromTarget || excelSpellLoading || selectedExcelAlt.trim().length === 0}
+										onClick={() => void handleExcelSpellCheck()}
+									>
+										<SpellCheck2 className={cn("size-3.5", excelSpellLoading && "animate-pulse")} aria-hidden />
+										맞춤법 검사
+									</Button>
+								</div>
 							</div>
-							<div ref={excelAltRef} onMouseUp={openSelectionTooltip} onKeyUp={openSelectionTooltip} className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap wrap-break-word border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground selection:bg-amber-200/70 dark:selection:bg-amber-700/40" aria-live="polite">
-								{!selected ? (
+							<div ref={excelAltRef} onMouseUp={openSelectionTooltip} onKeyUp={openSelectionTooltip} className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap wrap-break-word border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground selection:bg-emerald-200/70 dark:selection:bg-emerald-700/40" aria-live="polite">
+								{diffActive ? (
+									<DiffTextBlock lines={altDiff.right} activeRange={activeCommentRange} emptyText={!selected ? "이미지를 선택하세요." : selected.excludedFromTarget ? "대상에서 제외된 이미지입니다." : excelAltByPath.size === 0 ? "대체텍스트 엑셀(xlsx)을 업로드하면 여기에 표시됩니다." : "이 경로에 해당하는 엑셀 행이 없거나 alt가 비어 있습니다."} />
+								) : !selected ? (
 									<span className="text-muted-foreground">이미지를 선택하세요.</span>
 								) : selected.excludedFromTarget ? (
 									<span className="text-muted-foreground">대상에서 제외된 이미지입니다.</span>
@@ -781,16 +984,27 @@ export function AltInspectionWorkspace() {
 									<span className="text-muted-foreground">대체텍스트 엑셀(xlsx)을 업로드하면 여기에 표시됩니다.</span>
 								) : selectedExcelAlt.trim().length === 0 ? (
 									<span className="text-muted-foreground">이 경로에 해당하는 엑셀 행이 없거나 alt가 비어 있습니다.</span>
-								) : selectionRange && selectionRange.end <= selectedExcelAlt.length ? (
+								) : activeCommentRange && activeCommentRange.end <= selectedExcelAlt.length ? (
 									<>
-										{selectedExcelAlt.slice(0, selectionRange.start)}
-										<mark className="rounded bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-700/40">{selectedExcelAlt.slice(selectionRange.start, selectionRange.end)}</mark>
-										{selectedExcelAlt.slice(selectionRange.end)}
+										{selectedExcelAlt.slice(0, activeCommentRange.start)}
+										<mark className="box-decoration-clone rounded bg-emerald-200/80 px-0.5 text-inherit dark:bg-emerald-700/50">{selectedExcelAlt.slice(activeCommentRange.start, activeCommentRange.end)}</mark>
+										{selectedExcelAlt.slice(activeCommentRange.end)}
 									</>
 								) : (
 									selectedExcelAlt
 								)}
 							</div>
+							{excelSpellPreviewActive ? (
+								<>
+									<div role="separator" aria-orientation="horizontal" aria-label="맞춤법 미리보기 높이 조절" className="relative z-10 flex h-2 shrink-0 cursor-ns-resize touch-none items-center justify-center border-t border-border/80 bg-muted/15 hover:bg-muted/35" onPointerDown={onExcelSpellPreviewResizePointerDown} onPointerMove={onExcelSpellPreviewResizePointerMove} onPointerUp={onExcelSpellPreviewResizePointerUp} onPointerCancel={onExcelSpellPreviewResizePointerUp}>
+										<span className="pointer-events-none h-1 w-10 shrink-0 rounded-full bg-muted-foreground/35" aria-hidden />
+									</div>
+									<div className="min-h-22 shrink-0 overflow-y-auto bg-muted/25 px-4 py-3 [overflow-anchor:none]" style={{ height: excelSpellPreviewHeightPx }} aria-live="polite">
+										<p className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">맞춤법 미리보기</p>
+										<SpellDiffPreview text={excelSpellBaseline ?? ""} hits={excelSpellHits} />
+									</div>
+								</>
+							) : null}
 						</div>
 						<div className="border-t border-border/80 bg-card/60 p-3 lg:col-span-2 lg:col-start-2 lg:border-t lg:px-4" data-tutorial="inspection-comment">
 							<div className="rounded-lg border border-border/80 bg-background/70 p-3">
