@@ -444,10 +444,10 @@ export function ImageComparatorWorkspace() {
 					</button>
 				</div>
 
-				<div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-border/80">
-					<section className="min-h-0 p-2">
-						<p className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">이미지 목록</p>
-						<div className="app-scrollbar h-36 overflow-y-auto rounded border border-border/60 p-1">
+				<div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 divide-y divide-border/80">
+					<section className="flex min-h-0 flex-col p-2">
+						<p className="mb-1 shrink-0 text-[11px] font-medium uppercase text-muted-foreground">이미지 목록</p>
+						<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto rounded border border-border/60 p-1">
 							{images.length === 0 ? (
 								<p className="p-2 text-xs text-muted-foreground">이미지를 업로드해 주세요.</p>
 							) : (
@@ -464,9 +464,9 @@ export function ImageComparatorWorkspace() {
 						</div>
 					</section>
 
-					<section className="min-h-0 p-2">
-						<p className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">HTML 목록</p>
-						<div className="app-scrollbar h-40 overflow-y-auto rounded border border-border/60 p-1">
+					<section className="flex min-h-0 flex-col p-2">
+						<p className="mb-1 shrink-0 text-[11px] font-medium uppercase text-muted-foreground">HTML 목록</p>
+						<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto rounded border border-border/60 p-1">
 							{htmlFiles.length === 0 ? (
 								<p className="p-2 text-xs text-muted-foreground">ZIP 업로드 후 HTML을 선택해 주세요.</p>
 							) : (
