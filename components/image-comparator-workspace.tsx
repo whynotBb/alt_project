@@ -117,6 +117,11 @@ function rewriteHtmlWithZipAssets(html: string, htmlRelativePath: string, assetU
 	return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }
 
+function extractHtmlTitle(html: string): string {
+	const doc = new DOMParser().parseFromString(html, "text/html");
+	return doc.querySelector("title")?.textContent?.trim() ?? "";
+}
+
 function isSupportedImageFile(file: File): boolean {
 	return /\.(png|jpe?g|psd)$/i.test(file.name);
 }
@@ -172,6 +177,10 @@ export function ImageComparatorWorkspace() {
 		if (!selectedHtml) return "";
 		return rewriteHtmlWithZipAssets(selectedHtml.content, selectedHtml.relativePath, assetUrlByPath);
 	}, [assetUrlByPath, selectedHtml]);
+	const selectedHtmlTitle = useMemo(() => {
+		if (!selectedHtml) return "";
+		return extractHtmlTitle(selectedHtml.content);
+	}, [selectedHtml]);
 	const imageRender = useMemo(() => {
 		if (!canPreviewImage || imageNaturalSize.width === 0 || imageNaturalSize.height === 0) return null;
 		const targetW = htmlSize.width > 0 ? htmlSize.width : imageNaturalSize.width;
@@ -497,6 +506,7 @@ export function ImageComparatorWorkspace() {
 	const compareHint = !selectedHtml ? "왼쪽에서 HTML을 선택하면 미리보기 화면이 표시됩니다." : "";
 	const compareModeLabel = compareMode === "overlay" ? "겹쳐서 비교" : "분할해서 비교";
 	const shouldShowHtmlOnlyPreview = selectedHtml && (compareMode === "overlay" || !canPreviewImage);
+	const isOverlaySettingDisabled = compareMode === "split";
 
 	return (
 		<div className="flex h-[calc(100vh-5rem)] min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-(--app-canvas) shadow-sm">
@@ -633,34 +643,36 @@ export function ImageComparatorWorkspace() {
 						</div>
 
 						<div className="border-t border-border/80 p-2">
-							<div className="mb-2 flex items-center gap-2 text-xs">
-								<Layers className="size-4 text-muted-foreground" />
-								<label htmlFor="iframe-opacity">퍼블 화면 투명도</label>
-							</div>
-							<input id="iframe-opacity" type="range" min={0.1} max={1} step={0.01} value={iframeOpacity} onChange={(e) => setIframeOpacity(Number(e.target.value))} className="w-full" />
-							<div className="mt-2 flex items-center gap-2 text-xs">
-								<ImageIcon className="size-4 text-muted-foreground" />
-								<label htmlFor="image-opacity">이미지 투명도</label>
-							</div>
-							<input id="image-opacity" type="range" min={0.05} max={1} step={0.01} value={imageOpacity} onChange={(e) => setImageOpacity(Number(e.target.value))} className="w-full" />
-							<div className="mt-2 space-y-2 rounded border border-border/60 p-2">
-								<div className="flex items-center justify-between text-xs">
-									<span>이미지 오버레이</span>
-									<button type="button" className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-muted" onClick={() => setOverlayVisible((v) => !v)}>
-										{overlayVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-										{overlayVisible ? "보임" : "숨김"}
-									</button>
+							<div className={cn("transition-opacity", isOverlaySettingDisabled && "opacity-40")}>
+								<div className="mb-2 flex items-center gap-2 text-xs">
+									<Layers className="size-4 text-muted-foreground" />
+									<label htmlFor="iframe-opacity">퍼블 화면 투명도</label>
 								</div>
-								<div className="text-[11px] text-muted-foreground">휠: HTML 스크롤 · 드래그: 이동 · Ctrl/⌘+휠: 확대/축소</div>
-								<label htmlFor="overlay-scale" className="text-[11px] text-muted-foreground">
-									배율 ({Math.round(overlayScale * 100)}%)
-								</label>
-								<input id="overlay-scale" type="range" min={0.2} max={3} step={0.01} value={overlayScale} onChange={(e) => setOverlayScale(Number(e.target.value))} className="w-full" />
-								<div className="flex justify-end">
-									<Button type="button" variant="outline" size="sm" onClick={resetOverlay}>
-										<RotateCcw className="mr-1 size-4" />
-										정렬 리셋
-									</Button>
+								<input id="iframe-opacity" type="range" min={0.1} max={1} step={0.01} value={iframeOpacity} disabled={isOverlaySettingDisabled} onChange={(e) => setIframeOpacity(Number(e.target.value))} className="w-full disabled:cursor-not-allowed" />
+								<div className="mt-2 flex items-center gap-2 text-xs">
+									<ImageIcon className="size-4 text-muted-foreground" />
+									<label htmlFor="image-opacity">이미지 투명도</label>
+								</div>
+								<input id="image-opacity" type="range" min={0.05} max={1} step={0.01} value={imageOpacity} disabled={isOverlaySettingDisabled} onChange={(e) => setImageOpacity(Number(e.target.value))} className="w-full disabled:cursor-not-allowed" />
+								<div className="mt-2 space-y-2 rounded border border-border/60 p-2">
+									<div className="flex items-center justify-between text-xs">
+										<span>이미지 오버레이</span>
+										<button type="button" disabled={isOverlaySettingDisabled} className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:hover:bg-transparent" onClick={() => setOverlayVisible((v) => !v)}>
+											{overlayVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+											{overlayVisible ? "보임" : "숨김"}
+										</button>
+									</div>
+									<div className="text-[11px] text-muted-foreground">휠: HTML 스크롤 · 드래그: 이동 · Ctrl/⌘+휠: 확대/축소</div>
+									<label htmlFor="overlay-scale" className="text-[11px] text-muted-foreground">
+										배율 ({Math.round(overlayScale * 100)}%)
+									</label>
+									<input id="overlay-scale" type="range" min={0.2} max={3} step={0.01} value={overlayScale} disabled={isOverlaySettingDisabled} onChange={(e) => setOverlayScale(Number(e.target.value))} className="w-full disabled:cursor-not-allowed" />
+									<div className="flex justify-end">
+										<Button type="button" variant="outline" size="sm" disabled={isOverlaySettingDisabled} onClick={resetOverlay}>
+											<RotateCcw className="mr-1 size-4" />
+											정렬 리셋
+										</Button>
+									</div>
 								</div>
 							</div>
 							<div className="mt-2 flex justify-end">
@@ -675,8 +687,15 @@ export function ImageComparatorWorkspace() {
 				) : null}
 			</aside>
 
-			<section className="min-h-0 min-w-0 flex-1 bg-muted/20 p-3">
-				<div className="relative h-full w-full overflow-hidden rounded-lg border border-border/70 bg-black/5">
+			<section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 bg-muted/20 p-3">
+				{selectedHtmlTitle && (compareMode !== "split" || !canPreviewImage) ? (
+					<div className="shrink-0 truncate rounded-md border border-border/60 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
+						<span className="font-medium text-foreground">Title</span>
+						<span className="mx-2 text-border">|</span>
+						<span title={selectedHtmlTitle}>{selectedHtmlTitle}</span>
+					</div>
+				) : null}
+				<div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-border/70 bg-black/5">
 					{selectedImage && selectedImage.ext === "psd" ? <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">PSD 파일은 브라우저에서 직접 배경 렌더링이 어려워 현재 미리보기를 지원하지 않습니다. PNG/JPG를 선택하면 즉시 비교할 수 있습니다.</div> : null}
 
 					{compareMode === "overlay" && canPreviewImage && imageRender && overlayVisible ? (
@@ -703,13 +722,25 @@ export function ImageComparatorWorkspace() {
 
 					{compareMode === "split" && canPreviewImage && imageRender && selectedHtml ? (
 						<div className="grid h-full w-full grid-cols-2 divide-x divide-border/70">
-							<div ref={splitImageScrollRef} className="app-scrollbar min-h-0 overflow-auto bg-background" onScroll={onSplitImageScroll}>
-								<div style={{ width: imageRender.width, height: imageRender.height }}>
-									<NextImage src={selectedImage.url} alt="" width={imageRender.width} height={imageRender.height} unoptimized className="h-full w-full object-fill select-none" draggable={false} />
+							<div className="flex min-h-0 flex-col bg-background">
+								{selectedHtmlTitle ? <div className="shrink-0 border-b border-transparent px-3 py-2 text-xs opacity-0" aria-hidden="true">Title</div> : null}
+								<div ref={splitImageScrollRef} className="app-scrollbar min-h-0 flex-1 overflow-auto" onScroll={onSplitImageScroll}>
+									<div style={{ width: imageRender.width, height: imageRender.height }}>
+										<NextImage src={selectedImage.url} alt="" width={imageRender.width} height={imageRender.height} unoptimized className="h-full w-full object-fill select-none" draggable={false} />
+									</div>
 								</div>
 							</div>
-							<div className="relative min-h-0 overflow-hidden bg-background">
-								<iframe ref={iframeRef} title="퍼블리싱 HTML 비교 프리뷰" className="absolute inset-0 h-full w-full border-0" style={{ background: "transparent" }} srcDoc={renderedHtml} onLoad={bindIframeScrollSync} />
+							<div className="flex min-h-0 flex-col bg-background">
+								{selectedHtmlTitle ? (
+									<div className="shrink-0 truncate border-b border-border/60 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
+										<span className="font-medium text-foreground">Title</span>
+										<span className="mx-2 text-border">|</span>
+										<span title={selectedHtmlTitle}>{selectedHtmlTitle}</span>
+									</div>
+								) : null}
+								<div className="relative min-h-0 flex-1 overflow-hidden">
+									<iframe ref={iframeRef} title="퍼블리싱 HTML 비교 프리뷰" className="absolute inset-0 h-full w-full border-0" style={{ background: "transparent" }} srcDoc={renderedHtml} onLoad={bindIframeScrollSync} />
+								</div>
 							</div>
 						</div>
 					) : null}
