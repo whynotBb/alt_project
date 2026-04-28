@@ -1,9 +1,10 @@
 "use client";
 
+import NextImage from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, FileArchive, Image as ImageIcon, Layers, Loader2, RotateCcw, Trash2, Upload } from "lucide-react";
+import { ChevronLeft, ChevronRight, Columns2, Eye, EyeOff, FileArchive, Image as ImageIcon, Layers, Loader2, RotateCcw, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { extractZipAssets } from "@/lib/client/extract-zip-assets";
+import { extractZipAssets, isZipFile } from "@/lib/client/extract-zip-assets";
 import { cn } from "@/lib/utils";
 
 type LocalImageAsset = {
@@ -18,6 +19,10 @@ type HtmlAsset = {
 	relativePath: string;
 	content: string;
 };
+
+const COMPARATOR_SIDEBAR_COLLAPSE_QUERY = "(max-width: 780px)";
+
+type CompareMode = "overlay" | "split";
 
 function normalizePath(p: string): string {
 	const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
@@ -112,8 +117,16 @@ function rewriteHtmlWithZipAssets(html: string, htmlRelativePath: string, assetU
 	return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }
 
-function isSupportedImageFile(file: File): file is File {
+function isSupportedImageFile(file: File): boolean {
 	return /\.(png|jpe?g|psd)$/i.test(file.name);
+}
+
+function isSupportedZipImagePath(path: string): boolean {
+	return /\.(png|jpe?g)$/i.test(path);
+}
+
+function basename(path: string): string {
+	return path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
 }
 
 function extOf(name: string): LocalImageAsset["ext"] {
@@ -128,6 +141,8 @@ export function ImageComparatorWorkspace() {
 	const imageInputRef = useRef<HTMLInputElement>(null);
 	const zipInputRef = useRef<HTMLInputElement>(null);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
+	const splitImageScrollRef = useRef<HTMLDivElement | null>(null);
+	const isSyncingSplitScrollRef = useRef(false);
 
 	const [images, setImages] = useState<LocalImageAsset[]>([]);
 	const [htmlFiles, setHtmlFiles] = useState<HtmlAsset[]>([]);
@@ -140,11 +155,14 @@ export function ImageComparatorWorkspace() {
 	const [imageOpacity, setImageOpacity] = useState(0.6);
 	const [assetUrlByPath, setAssetUrlByPath] = useState<Map<string, string>>(() => new Map());
 	const [iframeScrollTop, setIframeScrollTop] = useState(0);
+	const [iframeScrollLeft, setIframeScrollLeft] = useState(0);
 	const [htmlSize, setHtmlSize] = useState({ width: 0, height: 0 });
 	const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
 	const [overlayVisible, setOverlayVisible] = useState(true);
 	const [overlayScale, setOverlayScale] = useState(1);
 	const [overlayOffset, setOverlayOffset] = useState({ x: 0, y: 0 });
+	const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window === "undefined" ? true : !window.matchMedia(COMPARATOR_SIDEBAR_COLLAPSE_QUERY).matches));
+	const [compareMode, setCompareMode] = useState<CompareMode>("split");
 	const dragRef = useRef<{ pointerId: number; startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
 
 	const selectedImage = useMemo(() => images.find((i) => i.id === selectedImageId) ?? null, [images, selectedImageId]);
@@ -166,9 +184,14 @@ export function ImageComparatorWorkspace() {
 
 	useEffect(() => {
 		setIframeScrollTop(0);
+		setIframeScrollLeft(0);
 		setHtmlSize({ width: 0, height: 0 });
 		setOverlayOffset({ x: 0, y: 0 });
 		setOverlayScale(1);
+		if (splitImageScrollRef.current) {
+			splitImageScrollRef.current.scrollTop = 0;
+			splitImageScrollRef.current.scrollLeft = 0;
+		}
 	}, [selectedHtmlId]);
 
 	useEffect(() => {
@@ -180,6 +203,17 @@ export function ImageComparatorWorkspace() {
 		img.onload = () => setImageNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
 		img.src = selectedImage.url;
 	}, [selectedImage]);
+
+	useEffect(() => {
+		const mediaQuery = window.matchMedia(COMPARATOR_SIDEBAR_COLLAPSE_QUERY);
+		const closeOnNarrowViewport = () => {
+			if (mediaQuery.matches) setIsSidebarOpen(false);
+		};
+
+		closeOnNarrowViewport();
+		mediaQuery.addEventListener("change", closeOnNarrowViewport);
+		return () => mediaQuery.removeEventListener("change", closeOnNarrowViewport);
+	}, []);
 
 	const bindIframeScrollSync = useCallback(() => {
 		const iframe = iframeRef.current;
@@ -196,7 +230,17 @@ export function ImageComparatorWorkspace() {
 
 		const onScroll = () => {
 			const top = win.scrollY || doc.documentElement?.scrollTop || doc.body?.scrollTop || 0;
+			const left = win.scrollX || doc.documentElement?.scrollLeft || doc.body?.scrollLeft || 0;
 			setIframeScrollTop(top);
+			setIframeScrollLeft(left);
+			const splitImageScroller = splitImageScrollRef.current;
+			if (splitImageScroller && !isSyncingSplitScrollRef.current) {
+				isSyncingSplitScrollRef.current = true;
+				splitImageScroller.scrollTo({ left, top });
+				window.requestAnimationFrame(() => {
+					isSyncingSplitScrollRef.current = false;
+				});
+			}
 		};
 		const syncSize = () => {
 			const root = doc.documentElement;
@@ -264,18 +308,36 @@ export function ImageComparatorWorkspace() {
 		if (!files || files.length === 0) return;
 		setImageBusy(true);
 		try {
-			const picked = Array.from(files).filter(isSupportedImageFile);
-			if (picked.length === 0) {
-				setNotice("png, jpg, jpeg, psd 파일만 업로드할 수 있습니다.");
+			const newRows: LocalImageAsset[] = [];
+			for (const file of Array.from(files)) {
+				if (isSupportedImageFile(file)) {
+					newRows.push({
+						id: crypto.randomUUID(),
+						name: file.name,
+						url: URL.createObjectURL(file),
+						ext: extOf(file.name),
+					});
+					continue;
+				}
+
+				if (isZipFile(file)) {
+					const extracted = await extractZipAssets(file);
+					for (const img of extracted.images) {
+						if (!isSupportedZipImagePath(img.relativePath)) continue;
+						newRows.push({
+							id: crypto.randomUUID(),
+							name: basename(img.relativePath),
+							url: URL.createObjectURL(img.blob),
+							ext: extOf(img.relativePath),
+						});
+					}
+				}
+			}
+			if (newRows.length === 0) {
+				setNotice("png, jpg, jpeg, psd 파일 또는 png/jpg가 포함된 ZIP 파일만 업로드할 수 있습니다.");
 				return;
 			}
 			setNotice("");
-			const newRows = picked.map((f) => ({
-				id: crypto.randomUUID(),
-				name: f.name,
-				url: URL.createObjectURL(f),
-				ext: extOf(f.name),
-			}));
 			setImages((prev) => {
 				const next = [...prev];
 				next.push(...newRows);
@@ -349,6 +411,26 @@ export function ImageComparatorWorkspace() {
 		setOverlayVisible(true);
 	}, [assetUrlByPath, images]);
 
+	const handleClearImages = useCallback(() => {
+		for (const img of images) URL.revokeObjectURL(img.url);
+		setImages([]);
+		setSelectedImageId(null);
+		setImageNaturalSize({ width: 0, height: 0 });
+		setOverlayOffset({ x: 0, y: 0 });
+		setOverlayScale(1);
+	}, [images]);
+
+	const handleClearHtml = useCallback(() => {
+		for (const v of assetUrlByPath.values()) URL.revokeObjectURL(v);
+		setHtmlFiles([]);
+		setAssetUrlByPath(new Map());
+		setSelectedHtmlId(null);
+		setNotice("");
+		setIframeScrollTop(0);
+		setIframeScrollLeft(0);
+		setHtmlSize({ width: 0, height: 0 });
+	}, [assetUrlByPath]);
+
 	const resetOverlay = useCallback(() => {
 		setOverlayOffset({ x: 0, y: 0 });
 		setOverlayScale(1);
@@ -399,143 +481,211 @@ export function ImageComparatorWorkspace() {
 		setOverlayScale((prev) => Math.max(0.2, Math.min(3, prev + delta)));
 	}, []);
 
-	const compareHint = !selectedImage || !selectedHtml ? "왼쪽에서 이미지와 HTML을 각각 선택하면 비교 화면이 표시됩니다." : "";
+	const onSplitImageScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+		if (isSyncingSplitScrollRef.current) return;
+		const nextTop = e.currentTarget.scrollTop;
+		const nextLeft = e.currentTarget.scrollLeft;
+		isSyncingSplitScrollRef.current = true;
+		setIframeScrollTop(nextTop);
+		setIframeScrollLeft(nextLeft);
+		iframeRef.current?.contentWindow?.scrollTo({ left: nextLeft, top: nextTop, behavior: "auto" });
+		window.requestAnimationFrame(() => {
+			isSyncingSplitScrollRef.current = false;
+		});
+	}, []);
+
+	const compareHint = !selectedHtml ? "왼쪽에서 HTML을 선택하면 미리보기 화면이 표시됩니다." : "";
+	const compareModeLabel = compareMode === "overlay" ? "겹쳐서 비교" : "분할해서 비교";
+	const shouldShowHtmlOnlyPreview = selectedHtml && (compareMode === "overlay" || !canPreviewImage);
 
 	return (
 		<div className="flex h-[calc(100vh-5rem)] min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-(--app-canvas) shadow-sm">
-			<aside className="flex w-full shrink-0 flex-col border-b border-border/80 bg-card/60 lg:w-80 lg:border-r lg:border-b-0">
-				<div className="border-b border-border/80 px-3 py-3">
-					<h2 className="text-sm font-semibold">이미지 대조</h2>
-					<p className="mt-1 text-xs text-muted-foreground">이미지(png/jpg)와 퍼블 ZIP 내 HTML을 선택해 겹쳐 비교합니다.</p>
-				</div>
-
-				<div className="space-y-2 border-b border-border/80 p-2">
-					<input
-						ref={imageInputRef}
-						type="file"
-						accept=".png,.jpg,.jpeg,.psd,image/png,image/jpeg"
-						multiple
-						className="sr-only"
-						onChange={async (e) => {
-							await onAddImages(e.target.files);
-							e.target.value = "";
-						}}
-					/>
-					<button type="button" onClick={() => imageInputRef.current?.click()} disabled={imageBusy} className={cn("flex w-full items-center gap-2 rounded-lg border-2 border-dashed px-3 py-2 text-left text-xs transition-colors", "border-primary/30 hover:border-primary/50 hover:bg-primary/3")}>
-						{imageBusy ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
-						<span>이미지 업로드 (png, jpg)</span>
-						<Upload className="ml-auto size-4 opacity-70" />
-					</button>
-
-					<input
-						ref={zipInputRef}
-						type="file"
-						accept=".zip,application/zip,application/x-zip-compressed"
-						className="sr-only"
-						onChange={async (e) => {
-							await onAddZip(e.target.files?.[0] ?? null);
-							e.target.value = "";
-						}}
-					/>
-					<button type="button" onClick={() => zipInputRef.current?.click()} disabled={zipBusy} className={cn("flex w-full items-center gap-2 rounded-lg border-2 border-dashed px-3 py-2 text-left text-xs transition-colors", "border-primary/30 hover:border-primary/50 hover:bg-primary/3")}>
-						{zipBusy ? <Loader2 className="size-4 animate-spin" /> : <FileArchive className="size-4" />}
-						<span>퍼블리싱 ZIP 업로드</span>
-						<Upload className="ml-auto size-4 opacity-70" />
-					</button>
-				</div>
-
-				<div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 divide-y divide-border/80">
-					<section className="flex min-h-0 flex-col p-2">
-						<p className="mb-1 shrink-0 text-[11px] font-medium uppercase text-muted-foreground">이미지 목록</p>
-						<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto rounded border border-border/60 p-1">
-							{images.length === 0 ? (
-								<p className="p-2 text-xs text-muted-foreground">이미지를 업로드해 주세요.</p>
-							) : (
-								<ul className="space-y-1">
-									{images.map((img) => (
-										<li key={img.id}>
-											<button type="button" onClick={() => setSelectedImageId(img.id)} className={cn("w-full rounded px-2 py-1 text-left text-xs", selectedImageId === img.id ? "bg-primary/15 text-primary" : "hover:bg-muted")}>
-												{img.name}
-											</button>
-										</li>
-									))}
-								</ul>
-							)}
-						</div>
-					</section>
-
-					<section className="flex min-h-0 flex-col p-2">
-						<p className="mb-1 shrink-0 text-[11px] font-medium uppercase text-muted-foreground">HTML 목록</p>
-						<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto rounded border border-border/60 p-1">
-							{htmlFiles.length === 0 ? (
-								<p className="p-2 text-xs text-muted-foreground">ZIP 업로드 후 HTML을 선택해 주세요.</p>
-							) : (
-								<ul className="space-y-1">
-									{htmlFiles.map((h) => (
-										<li key={h.id}>
-											<button type="button" onClick={() => setSelectedHtmlId(h.id)} className={cn("w-full rounded px-2 py-1 text-left font-mono text-[11px]", selectedHtmlId === h.id ? "bg-primary/15 text-primary" : "hover:bg-muted")}>
-												{h.relativePath}
-											</button>
-										</li>
-									))}
-								</ul>
-							)}
-						</div>
-					</section>
-				</div>
-
-				<div className="border-t border-border/80 p-2">
-					<div className="mb-2 flex items-center gap-2 text-xs">
-						<Layers className="size-4 text-muted-foreground" />
-						<label htmlFor="iframe-opacity">퍼블 화면 투명도</label>
+			<aside className={cn("flex shrink-0 flex-col border-r border-border/80 bg-card/60 transition-[width] duration-200", isSidebarOpen ? "w-80 max-w-[80vw]" : "w-12")}>
+				<div className={cn("border-b border-border/80 py-3", isSidebarOpen ? "px-3" : "px-2")}>
+					<div className="flex items-start gap-2">
+						{isSidebarOpen ? (
+							<div className="min-w-0 flex-1">
+								<div className="flex items-center gap-2">
+									<h2 className="text-sm font-semibold">이미지 대조</h2>
+									<button
+										type="button"
+										aria-label={compareMode === "overlay" ? "분할해서 비교로 전환" : "겹쳐서 비교로 전환"}
+										aria-pressed={compareMode === "split"}
+										title={compareModeLabel}
+										className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 text-muted-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground"
+										onClick={() => setCompareMode((mode) => (mode === "overlay" ? "split" : "overlay"))}
+									>
+										{compareMode === "overlay" ? <Layers className="size-4" /> : <Columns2 className="size-4" />}
+									</button>
+								</div>
+								<p className="mt-1 text-xs text-muted-foreground">이미지(png/jpg)와 퍼블 ZIP 내 HTML을 선택해 {compareModeLabel}합니다.</p>
+							</div>
+						) : null}
+						<button
+							type="button"
+							aria-expanded={isSidebarOpen}
+							aria-label={isSidebarOpen ? "이미지 대조 좌측 패널 닫기" : "이미지 대조 좌측 패널 열기"}
+							className="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 text-muted-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground"
+							onClick={() => setIsSidebarOpen((open) => !open)}
+						>
+							{isSidebarOpen ? <ChevronLeft className="size-4" /> : <ChevronRight className="size-4" />}
+						</button>
 					</div>
-					<input id="iframe-opacity" type="range" min={0.1} max={1} step={0.01} value={iframeOpacity} onChange={(e) => setIframeOpacity(Number(e.target.value))} className="w-full" />
-					<div className="mt-2 flex items-center gap-2 text-xs">
-						<ImageIcon className="size-4 text-muted-foreground" />
-						<label htmlFor="image-opacity">이미지 투명도</label>
-					</div>
-					<input id="image-opacity" type="range" min={0.05} max={1} step={0.01} value={imageOpacity} onChange={(e) => setImageOpacity(Number(e.target.value))} className="w-full" />
-					<div className="mt-2 space-y-2 rounded border border-border/60 p-2">
-						<div className="flex items-center justify-between text-xs">
-							<span>이미지 오버레이</span>
-							<button type="button" className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-muted" onClick={() => setOverlayVisible((v) => !v)}>
-								{overlayVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-								{overlayVisible ? "보임" : "숨김"}
+				</div>
+
+				{isSidebarOpen ? (
+					<>
+						<div className="space-y-2 border-b border-border/80 p-2">
+							<input
+								ref={imageInputRef}
+								type="file"
+								accept=".png,.jpg,.jpeg,.psd,.zip,image/png,image/jpeg,application/zip,application/x-zip-compressed"
+								multiple
+								className="sr-only"
+								onChange={async (e) => {
+									await onAddImages(e.target.files);
+									e.target.value = "";
+								}}
+							/>
+							<button type="button" onClick={() => imageInputRef.current?.click()} disabled={imageBusy} className={cn("flex w-full items-center gap-2 rounded-lg border-2 border-dashed px-3 py-2 text-left text-xs transition-colors", "border-primary/30 hover:border-primary/50 hover:bg-primary/3")}>
+								{imageBusy ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
+								<span>이미지 업로드 (png, jpg, zip)</span>
+								<Upload className="ml-auto size-4 opacity-70" />
+							</button>
+
+							<input
+								ref={zipInputRef}
+								type="file"
+								accept=".zip,application/zip,application/x-zip-compressed"
+								className="sr-only"
+								onChange={async (e) => {
+									await onAddZip(e.target.files?.[0] ?? null);
+									e.target.value = "";
+								}}
+							/>
+							<button type="button" onClick={() => zipInputRef.current?.click()} disabled={zipBusy} className={cn("flex w-full items-center gap-2 rounded-lg border-2 border-dashed px-3 py-2 text-left text-xs transition-colors", "border-primary/30 hover:border-primary/50 hover:bg-primary/3")}>
+								{zipBusy ? <Loader2 className="size-4 animate-spin" /> : <FileArchive className="size-4" />}
+								<span>퍼블리싱 ZIP 업로드</span>
+								<Upload className="ml-auto size-4 opacity-70" />
 							</button>
 						</div>
-						<div className="text-[11px] text-muted-foreground">휠: HTML 스크롤 · 드래그: 이동 · Ctrl/⌘+휠: 확대/축소</div>
-						<label htmlFor="overlay-scale" className="text-[11px] text-muted-foreground">
-							배율 ({Math.round(overlayScale * 100)}%)
-						</label>
-						<input id="overlay-scale" type="range" min={0.2} max={3} step={0.01} value={overlayScale} onChange={(e) => setOverlayScale(Number(e.target.value))} className="w-full" />
-						<div className="flex justify-end">
-							<Button type="button" variant="outline" size="sm" onClick={resetOverlay}>
-								<RotateCcw className="mr-1 size-4" />
-								정렬 리셋
-							</Button>
+
+						<div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 divide-y divide-border/80">
+							<section className="flex min-h-0 flex-col p-2">
+								<div className="mb-1 flex shrink-0 items-center justify-between gap-2">
+									<p className="text-[11px] font-medium uppercase text-muted-foreground">이미지 목록</p>
+									<button
+										type="button"
+										aria-label="이미지 목록 비우기"
+										disabled={images.length === 0}
+										className="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+										onClick={handleClearImages}
+									>
+										<Trash2 className="size-3.5" />
+									</button>
+								</div>
+								<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto rounded border border-border/60 p-1">
+									{images.length === 0 ? (
+										<p className="p-2 text-xs text-muted-foreground">이미지를 업로드해 주세요.</p>
+									) : (
+										<ul className="space-y-1">
+											{images.map((img) => (
+												<li key={img.id}>
+													<button type="button" onClick={() => setSelectedImageId(img.id)} className={cn("w-full rounded px-2 py-1 text-left text-xs", selectedImageId === img.id ? "bg-primary/15 text-primary" : "hover:bg-muted")}>
+														{img.name}
+													</button>
+												</li>
+											))}
+										</ul>
+									)}
+								</div>
+							</section>
+
+							<section className="flex min-h-0 flex-col p-2">
+								<div className="mb-1 flex shrink-0 items-center justify-between gap-2">
+									<p className="text-[11px] font-medium uppercase text-muted-foreground">HTML 목록</p>
+									<button
+										type="button"
+										aria-label="HTML 목록 비우기"
+										disabled={htmlFiles.length === 0}
+										className="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+										onClick={handleClearHtml}
+									>
+										<Trash2 className="size-3.5" />
+									</button>
+								</div>
+								<div className="app-scrollbar min-h-0 flex-1 overflow-y-auto rounded border border-border/60 p-1">
+									{htmlFiles.length === 0 ? (
+										<p className="p-2 text-xs text-muted-foreground">ZIP 업로드 후 HTML을 선택해 주세요.</p>
+									) : (
+										<ul className="space-y-1">
+											{htmlFiles.map((h) => (
+												<li key={h.id}>
+													<button type="button" onClick={() => setSelectedHtmlId(h.id)} className={cn("w-full rounded px-2 py-1 text-left font-mono text-[11px]", selectedHtmlId === h.id ? "bg-primary/15 text-primary" : "hover:bg-muted")}>
+														{h.relativePath}
+													</button>
+												</li>
+											))}
+										</ul>
+									)}
+								</div>
+							</section>
 						</div>
-					</div>
-					<div className="mt-2 flex justify-end">
-						<Button type="button" variant="outline" size="sm" onClick={handleClear}>
-							<Trash2 className="mr-1 size-4" />
-							초기화
-						</Button>
-					</div>
-					{notice ? <p className="mt-2 text-xs text-destructive">{notice}</p> : null}
-				</div>
+
+						<div className="border-t border-border/80 p-2">
+							<div className="mb-2 flex items-center gap-2 text-xs">
+								<Layers className="size-4 text-muted-foreground" />
+								<label htmlFor="iframe-opacity">퍼블 화면 투명도</label>
+							</div>
+							<input id="iframe-opacity" type="range" min={0.1} max={1} step={0.01} value={iframeOpacity} onChange={(e) => setIframeOpacity(Number(e.target.value))} className="w-full" />
+							<div className="mt-2 flex items-center gap-2 text-xs">
+								<ImageIcon className="size-4 text-muted-foreground" />
+								<label htmlFor="image-opacity">이미지 투명도</label>
+							</div>
+							<input id="image-opacity" type="range" min={0.05} max={1} step={0.01} value={imageOpacity} onChange={(e) => setImageOpacity(Number(e.target.value))} className="w-full" />
+							<div className="mt-2 space-y-2 rounded border border-border/60 p-2">
+								<div className="flex items-center justify-between text-xs">
+									<span>이미지 오버레이</span>
+									<button type="button" className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-muted" onClick={() => setOverlayVisible((v) => !v)}>
+										{overlayVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+										{overlayVisible ? "보임" : "숨김"}
+									</button>
+								</div>
+								<div className="text-[11px] text-muted-foreground">휠: HTML 스크롤 · 드래그: 이동 · Ctrl/⌘+휠: 확대/축소</div>
+								<label htmlFor="overlay-scale" className="text-[11px] text-muted-foreground">
+									배율 ({Math.round(overlayScale * 100)}%)
+								</label>
+								<input id="overlay-scale" type="range" min={0.2} max={3} step={0.01} value={overlayScale} onChange={(e) => setOverlayScale(Number(e.target.value))} className="w-full" />
+								<div className="flex justify-end">
+									<Button type="button" variant="outline" size="sm" onClick={resetOverlay}>
+										<RotateCcw className="mr-1 size-4" />
+										정렬 리셋
+									</Button>
+								</div>
+							</div>
+							<div className="mt-2 flex justify-end">
+								<Button type="button" variant="outline" size="sm" onClick={handleClear}>
+									<Trash2 className="mr-1 size-4" />
+									초기화
+								</Button>
+							</div>
+							{notice ? <p className="mt-2 text-xs text-destructive">{notice}</p> : null}
+						</div>
+					</>
+				) : null}
 			</aside>
 
 			<section className="min-h-0 min-w-0 flex-1 bg-muted/20 p-3">
 				<div className="relative h-full w-full overflow-hidden rounded-lg border border-border/70 bg-black/5">
 					{selectedImage && selectedImage.ext === "psd" ? <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">PSD 파일은 브라우저에서 직접 배경 렌더링이 어려워 현재 미리보기를 지원하지 않습니다. PNG/JPG를 선택하면 즉시 비교할 수 있습니다.</div> : null}
 
-					{canPreviewImage && imageRender && overlayVisible ? (
+					{compareMode === "overlay" && canPreviewImage && imageRender && overlayVisible ? (
 						<div
 							className="absolute top-0 left-0 z-10 cursor-grab active:cursor-grabbing will-change-transform"
 							style={{
 								width: imageRender.width,
 								height: imageRender.height,
-								transform: `translate(${overlayOffset.x}px, ${overlayOffset.y - iframeScrollTop}px) scale(${overlayScale})`,
+								transform: `translate(${overlayOffset.x - iframeScrollLeft}px, ${overlayOffset.y - iframeScrollTop}px) scale(${overlayScale})`,
 								transformOrigin: "top left",
 								opacity: imageOpacity,
 							}}
@@ -545,11 +695,24 @@ export function ImageComparatorWorkspace() {
 							onPointerCancel={onOverlayPointerUp}
 							onWheel={onOverlayWheel}
 						>
-							<img src={selectedImage.url} alt="" className="h-full w-full object-fill select-none" draggable={false} />
+							<NextImage src={selectedImage.url} alt="" width={imageRender.width} height={imageRender.height} unoptimized className="h-full w-full object-fill select-none" draggable={false} />
 						</div>
 					) : null}
 
-					{selectedHtml ? <iframe ref={iframeRef} title="퍼블리싱 HTML 비교 프리뷰" className="absolute inset-0 h-full w-full border-0" style={{ opacity: iframeOpacity, background: "transparent" }} srcDoc={renderedHtml} onLoad={bindIframeScrollSync} /> : null}
+					{shouldShowHtmlOnlyPreview ? <iframe ref={iframeRef} title="퍼블리싱 HTML 비교 프리뷰" className="absolute inset-0 h-full w-full border-0" style={{ opacity: compareMode === "overlay" && canPreviewImage ? iframeOpacity : 1, background: "transparent" }} srcDoc={renderedHtml} onLoad={bindIframeScrollSync} /> : null}
+
+					{compareMode === "split" && canPreviewImage && imageRender && selectedHtml ? (
+						<div className="grid h-full w-full grid-cols-2 divide-x divide-border/70">
+							<div ref={splitImageScrollRef} className="app-scrollbar min-h-0 overflow-auto bg-background" onScroll={onSplitImageScroll}>
+								<div style={{ width: imageRender.width, height: imageRender.height }}>
+									<NextImage src={selectedImage.url} alt="" width={imageRender.width} height={imageRender.height} unoptimized className="h-full w-full object-fill select-none" draggable={false} />
+								</div>
+							</div>
+							<div className="relative min-h-0 overflow-hidden bg-background">
+								<iframe ref={iframeRef} title="퍼블리싱 HTML 비교 프리뷰" className="absolute inset-0 h-full w-full border-0" style={{ background: "transparent" }} srcDoc={renderedHtml} onLoad={bindIframeScrollSync} />
+							</div>
+						</div>
+					) : null}
 
 					{compareHint ? <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-muted-foreground">{compareHint}</div> : null}
 				</div>
