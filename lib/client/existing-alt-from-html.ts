@@ -1,4 +1,5 @@
 import { normalizeZipRelativePath, resolveImgSrcToZipRelativeKey } from "@/lib/client/resolve-html-img-src";
+import { normalizeImportedAltText } from "@/lib/client/normalize-alt-text";
 
 export type HtmlAssetLike = {
   relativePath: string;
@@ -29,8 +30,8 @@ export function getExistingAltFromHtmlForImage(
       if (resolved !== target) continue;
       const alt = img.getAttribute("alt");
       if (alt === null) continue;
-      const t = alt.trim();
-      if (t.length > 0) return alt;
+      const normalizedAlt = normalizeImportedAltText(alt);
+      if (normalizedAlt.trim().length > 0) return normalizedAlt;
     }
   }
   return "";

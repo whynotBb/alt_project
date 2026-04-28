@@ -30,7 +30,7 @@ export function EditablePlainText({ id, value, onChange, disabled, placeholder, 
 	}, [value]);
 
 	return (
-		<div className="relative min-h-0 flex-1">
+		<div className="relative flex min-h-0 flex-1 flex-col">
 			{showPlaceholder ? (
 				<p className="pointer-events-none absolute inset-0 z-0 overflow-hidden p-4 text-left font-mono text-sm leading-relaxed text-muted-foreground select-none">{placeholder}</p>
 			) : null}

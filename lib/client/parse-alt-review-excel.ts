@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { decode } from "html-entities";
 import { normalizeZipRelativePath } from "@/lib/client/resolve-html-img-src";
+import { normalizeImportedAltText } from "@/lib/client/normalize-alt-text";
 
 /** 엑셀 C열 경로 표기와 이미지 `name` 매칭용 키 */
 export function pathLabelLookupKey(pathLabel: string): string {
@@ -42,7 +43,8 @@ export function extractAltFromImgTagCell(htmlOrTag: string): string {
 	const tag = m ? m[0] : s;
 	const altM = tag.match(/\balt\s*=\s*(["'])([\s\S]*?)\1/i);
 	if (!altM) return "";
-	return decode(altM[2] ?? "").trim();
+	const alt = normalizeImportedAltText(decode(altM[2] ?? ""));
+	return alt.trim().length > 0 ? alt : "";
 }
 
 function extractSrcFromImgTagCell(htmlOrTag: string): string {
