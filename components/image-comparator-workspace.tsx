@@ -56,6 +56,19 @@ function resolveAttrToZipPath(htmlPath: string, attrValue: string): string | nul
 	return normalizePath(`${dirname(htmlPath)}/${decoded}`);
 }
 
+function isCssAssetPath(p: string): boolean {
+	return /\.css$/i.test(p);
+}
+
+function rewriteCssWithZipAssets(css: string, cssRelativePath: string, assetUrlByPath: Map<string, string>): string {
+	return css.replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi, (match, _quote: string, rawUrl: string) => {
+		const key = resolveAttrToZipPath(cssRelativePath, rawUrl);
+		if (!key) return match;
+		const blobUrl = assetUrlByPath.get(key);
+		return blobUrl ? `url("${blobUrl}")` : match;
+	});
+}
+
 function rewriteHtmlWithZipAssets(html: string, htmlRelativePath: string, assetUrlByPath: Map<string, string>): string {
 	const doc = new DOMParser().parseFromString(html, "text/html");
 	const rewriteAttr = (selector: string, attr: "src" | "href" | "poster") => {
@@ -112,7 +125,6 @@ function extOf(name: string): LocalImageAsset["ext"] {
 }
 
 export function ImageComparatorWorkspace() {
-	const SCROLLBAR_SAFE_GUTTER = 20;
 	const imageInputRef = useRef<HTMLInputElement>(null);
 	const zipInputRef = useRef<HTMLInputElement>(null);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -145,15 +157,12 @@ export function ImageComparatorWorkspace() {
 	const imageRender = useMemo(() => {
 		if (!canPreviewImage || imageNaturalSize.width === 0 || imageNaturalSize.height === 0) return null;
 		const targetW = htmlSize.width > 0 ? htmlSize.width : imageNaturalSize.width;
-		const targetH = htmlSize.height > 0 ? htmlSize.height : imageNaturalSize.height;
-		const scaleW = targetW / imageNaturalSize.width;
-		const scaleH = targetH / imageNaturalSize.height;
-		const scale = Math.max(0.01, (scaleW + scaleH) / 2);
+		const scale = Math.max(0.01, targetW / imageNaturalSize.width);
 		return {
-			width: Math.max(1, Math.round(imageNaturalSize.width * scale)),
+			width: Math.max(1, Math.round(targetW)),
 			height: Math.max(1, Math.round(imageNaturalSize.height * scale)),
 		};
-	}, [canPreviewImage, htmlSize.height, htmlSize.width, imageNaturalSize.height, imageNaturalSize.width]);
+	}, [canPreviewImage, htmlSize.width, imageNaturalSize.height, imageNaturalSize.width]);
 
 	useEffect(() => {
 		setIframeScrollTop(0);
@@ -175,9 +184,15 @@ export function ImageComparatorWorkspace() {
 	const bindIframeScrollSync = useCallback(() => {
 		const iframe = iframeRef.current;
 		if (!iframe) return;
+		const boundIframe = iframe as HTMLIFrameElement & { __cleanupScrollSync?: () => void };
+		boundIframe.__cleanupScrollSync?.();
+
 		const win = iframe.contentWindow;
 		const doc = iframe.contentDocument;
 		if (!win || !doc) return;
+		let disposed = false;
+		const timeoutIds: number[] = [];
+		const rafIds: number[] = [];
 
 		const onScroll = () => {
 			const top = win.scrollY || doc.documentElement?.scrollTop || doc.body?.scrollTop || 0;
@@ -186,23 +201,44 @@ export function ImageComparatorWorkspace() {
 		const syncSize = () => {
 			const root = doc.documentElement;
 			const body = doc.body;
-			// 가로는 스크롤 전체폭(scrollWidth) 대신 실제 iframe 뷰포트 폭 기준으로 맞춥니다.
-			const viewportWidth = Math.max(win.innerWidth || 0, root?.clientWidth ?? 0, body?.clientWidth ?? 0);
+			// root.clientWidth는 iframe 내부 세로 스크롤바 폭을 제외한 실제 콘텐츠 표시 폭입니다.
+			const viewportWidth = root?.clientWidth || body?.clientWidth || win.innerWidth || 0;
 			const height = Math.max(root?.scrollHeight ?? 0, body?.scrollHeight ?? 0, root?.clientHeight ?? 0, body?.clientHeight ?? 0);
 			setHtmlSize({ width: viewportWidth, height });
+		};
+		const queueSyncSize = () => {
+			if (disposed) return;
+			const rafId = win.requestAnimationFrame(() => {
+				if (!disposed) syncSize();
+			});
+			rafIds.push(rafId);
 		};
 
 		onScroll();
 		syncSize();
 		win.addEventListener("scroll", onScroll, { passive: true });
-		win.addEventListener("resize", syncSize);
+		win.addEventListener("resize", queueSyncSize);
+
+		const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(queueSyncSize) : null;
+		if (resizeObserver) {
+			if (doc.documentElement) resizeObserver.observe(doc.documentElement);
+			if (doc.body) resizeObserver.observe(doc.body);
+		}
+
+		for (const delay of [100, 300, 800]) {
+			timeoutIds.push(win.setTimeout(queueSyncSize, delay));
+		}
 
 		const cleanup = () => {
+			disposed = true;
 			win.removeEventListener("scroll", onScroll);
-			win.removeEventListener("resize", syncSize);
+			win.removeEventListener("resize", queueSyncSize);
+			resizeObserver?.disconnect();
+			for (const timeoutId of timeoutIds) win.clearTimeout(timeoutId);
+			for (const rafId of rafIds) win.cancelAnimationFrame(rafId);
 		};
 		iframe.dataset.scrollSyncBound = "1";
-		(iframe as HTMLIFrameElement & { __cleanupScrollSync?: () => void }).__cleanupScrollSync = cleanup;
+		boundIframe.__cleanupScrollSync = cleanup;
 	}, []);
 
 	useEffect(() => {
@@ -267,8 +303,19 @@ export function ImageComparatorWorkspace() {
 						content: h.content,
 					});
 				}
-				for (const asset of extracted.images) {
-					nextAssetMap.set(normalizePath(asset.relativePath), URL.createObjectURL(asset.blob));
+				const cssAssets: typeof extracted.assets = [];
+				for (const asset of extracted.assets) {
+					if (isCssAssetPath(asset.relativePath)) {
+						cssAssets.push(asset);
+					} else {
+						nextAssetMap.set(normalizePath(asset.relativePath), URL.createObjectURL(asset.blob));
+					}
+				}
+				for (const asset of cssAssets) {
+					const css = await asset.blob.text();
+					const rewrittenCss = rewriteCssWithZipAssets(css, asset.relativePath, nextAssetMap);
+					const cssBlob = new Blob([rewrittenCss], { type: "text/css" });
+					nextAssetMap.set(normalizePath(asset.relativePath), URL.createObjectURL(cssBlob));
 				}
 				rows.sort((a, b) => a.relativePath.localeCompare(b.relativePath, "ko", { sensitivity: "base" }));
 				setHtmlFiles(rows);
@@ -343,8 +390,11 @@ export function ImageComparatorWorkspace() {
 	}, []);
 
 	const onOverlayWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-		if (!e.ctrlKey && !e.metaKey) return;
 		e.preventDefault();
+		if (!e.ctrlKey && !e.metaKey) {
+			iframeRef.current?.contentWindow?.scrollBy({ left: e.deltaX, top: e.deltaY, behavior: "auto" });
+			return;
+		}
 		const delta = e.deltaY > 0 ? -0.04 : 0.04;
 		setOverlayScale((prev) => Math.max(0.2, Math.min(3, prev + delta)));
 	}, []);
@@ -356,7 +406,7 @@ export function ImageComparatorWorkspace() {
 			<aside className="flex w-full shrink-0 flex-col border-b border-border/80 bg-card/60 lg:w-80 lg:border-r lg:border-b-0">
 				<div className="border-b border-border/80 px-3 py-3">
 					<h2 className="text-sm font-semibold">이미지 대조</h2>
-					<p className="mt-1 text-xs text-muted-foreground">이미지(png/jpg/psd)와 퍼블 ZIP 내 HTML을 선택해 겹쳐 비교합니다.</p>
+					<p className="mt-1 text-xs text-muted-foreground">이미지(png/jpg)와 퍼블 ZIP 내 HTML을 선택해 겹쳐 비교합니다.</p>
 				</div>
 
 				<div className="space-y-2 border-b border-border/80 p-2">
@@ -453,7 +503,7 @@ export function ImageComparatorWorkspace() {
 								{overlayVisible ? "보임" : "숨김"}
 							</button>
 						</div>
-						<div className="text-[11px] text-muted-foreground">드래그: 이동 · Ctrl/⌘+휠: 확대/축소</div>
+						<div className="text-[11px] text-muted-foreground">휠: HTML 스크롤 · 드래그: 이동 · Ctrl/⌘+휠: 확대/축소</div>
 						<label htmlFor="overlay-scale" className="text-[11px] text-muted-foreground">
 							배율 ({Math.round(overlayScale * 100)}%)
 						</label>
@@ -488,7 +538,6 @@ export function ImageComparatorWorkspace() {
 								transform: `translate(${overlayOffset.x}px, ${overlayOffset.y - iframeScrollTop}px) scale(${overlayScale})`,
 								transformOrigin: "top left",
 								opacity: imageOpacity,
-								clipPath: `inset(0 ${SCROLLBAR_SAFE_GUTTER}px 0 0)`,
 							}}
 							onPointerDown={onOverlayPointerDown}
 							onPointerMove={onOverlayPointerMove}

@@ -2,10 +2,12 @@ import JSZip from "jszip";
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 const HTML_EXT = /\.html?$/i;
+const CSS_EXT = /\.css$/i;
 export const MAX_HTML_ENTRIES = 200;
 
 export type ExtractedZipImage = { relativePath: string; blob: Blob };
 export type ExtractedZipHtml = { relativePath: string; content: string };
+export type ExtractedZipAsset = { relativePath: string; blob: Blob };
 
 function detectZipContentRootPrefix(allFilePaths: string[]): string {
   if (allFilePaths.length === 0) return "";
@@ -55,9 +57,16 @@ function mimeForImagePath(p: string): string {
   return "application/octet-stream";
 }
 
+function mimeForAssetPath(p: string): string {
+  if (IMAGE_EXT.test(p)) return mimeForImagePath(p);
+  if (CSS_EXT.test(p)) return "text/css";
+  return "application/octet-stream";
+}
+
 export async function extractZipAssets(file: File): Promise<{
   images: ExtractedZipImage[];
   htmlFiles: ExtractedZipHtml[];
+  assets: ExtractedZipAsset[];
 }> {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const allFilePaths = Object.entries(zip.files)
@@ -67,6 +76,7 @@ export async function extractZipAssets(file: File): Promise<{
 
   const images: ExtractedZipImage[] = [];
   const htmlFiles: ExtractedZipHtml[] = [];
+  const assets: ExtractedZipAsset[] = [];
 
   for (const [path, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
@@ -75,18 +85,21 @@ export async function extractZipAssets(file: File): Promise<{
       if (htmlFiles.length >= MAX_HTML_ENTRIES) continue;
       const content = await entry.async("string");
       htmlFiles.push({ relativePath: posix, content });
-    } else if (IMAGE_EXT.test(posix)) {
-      const ab = await entry.async("arraybuffer");
-      images.push({
-        relativePath: posix,
-        blob: new Blob([ab], { type: mimeForImagePath(posix) }),
-      });
+      continue;
+    }
+
+    const ab = await entry.async("arraybuffer");
+    const blob = new Blob([ab], { type: mimeForAssetPath(posix) });
+    assets.push({ relativePath: posix, blob });
+    if (IMAGE_EXT.test(posix)) {
+      images.push({ relativePath: posix, blob });
     }
   }
 
   images.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
   htmlFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-  return { images, htmlFiles };
+  assets.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return { images, htmlFiles, assets };
 }
 
 export function isZipFile(file: File): boolean {
