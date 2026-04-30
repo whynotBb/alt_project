@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Check, RotateCcw, X } from "lucide-react";
+import { Check, RotateCcw, Undo2, X } from "lucide-react";
 import { type RowComponentProps } from "react-window";
 import { cn } from "@/lib/utils";
 import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
@@ -25,6 +25,8 @@ export type ImageListRowData = {
 	selectedId: string | null;
 	onSelect: (id: string) => void;
 	onUndoExclude?: (id: string) => void;
+	/** ALT 작성: 승인·대상 제외 판정 되돌리기 */
+	onUndoJudgment?: (id: string) => void;
 	variant: ImageListRowVariant;
 };
 
@@ -64,11 +66,14 @@ export function ImageListRow({ index, style, ...data }: RowComponentProps<ImageL
 		}
 	}
 
+	const showExtractUndo =
+		data.variant === "extract" && data.onUndoJudgment && (Boolean(it.reviewed) || it.excludedFromTarget);
+
 	return (
 		<div style={style} className="pb-1">
 			<div
 				className={cn(
-					"flex h-[48px] w-full items-center gap-2 rounded-xl border border-transparent px-2 text-left text-sm transition-colors",
+					"flex h-[48px] w-full items-center gap-1.5 rounded-xl border border-transparent px-2 text-left text-sm transition-colors",
 					isActive ? "border-primary/25 bg-sky-50 shadow-sm dark:bg-sky-950/40" : it.excludedFromTarget ? "text-muted-foreground opacity-80 hover:bg-muted/70" : "text-foreground hover:bg-muted/70",
 				)}
 			>
@@ -80,22 +85,38 @@ export function ImageListRow({ index, style, ...data }: RowComponentProps<ImageL
 					<span className="min-w-0 flex-1 truncate font-medium" title={it.name !== listLabel ? `${listLabel} — ${it.name}` : it.name}>
 						{listLabel}
 					</span>
-					{statusIcon}
 				</button>
-				{it.excludedFromTarget && data.onUndoExclude ? (
-					<button
-						type="button"
-						className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background/80 px-1.5 text-[11px] font-medium text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-						onClick={(e) => {
-							e.stopPropagation();
-							data.onUndoExclude?.(it.id);
-						}}
-						aria-label={`${listLabel} 대상 제외 취소`}
-					>
-						<RotateCcw className="size-3" aria-hidden />
-						취소
-					</button>
-				) : null}
+				<div className="flex shrink-0 items-center gap-0.5">
+					<span className="flex size-5 items-center justify-center">{statusIcon}</span>
+					{showExtractUndo ? (
+						<button
+							type="button"
+							className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							onClick={(e) => {
+								e.stopPropagation();
+								data.onUndoJudgment?.(it.id);
+							}}
+							aria-label={it.excludedFromTarget ? `${listLabel} 대상 제외 취소` : `${listLabel} 승인 취소`}
+							title={it.excludedFromTarget ? "대상 제외 취소" : "승인 취소"}
+						>
+							<Undo2 className="size-3.5" aria-hidden />
+						</button>
+					) : null}
+					{data.variant === "inspection" && it.excludedFromTarget && data.onUndoExclude ? (
+						<button
+							type="button"
+							className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background/80 px-1.5 text-[11px] font-medium text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							onClick={(e) => {
+								e.stopPropagation();
+								data.onUndoExclude?.(it.id);
+							}}
+							aria-label={`${listLabel} 대상 제외 취소`}
+						>
+							<RotateCcw className="size-3" aria-hidden />
+							취소
+						</button>
+					) : null}
+				</div>
 			</div>
 		</div>
 	);

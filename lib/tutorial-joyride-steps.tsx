@@ -67,7 +67,7 @@ export function getTutorialJoyrideSteps(): Step[] {
 			id: TUTORIAL_JOYRIDE_STEP_IDS.reviewActions,
 			target: '[data-tutorial="review-actions"]',
 			title: "Step 5. 검수 의사결정 (승인/제외)",
-			content: demo("검수가 끝나면 '승인'을, 제외할 이미지는 '대상 제외'를 클릭하세요."),
+			content: demo("버튼 순서는 나중에 검수 → 대상 제외 → 승인입니다. 미룰 때는 '나중에 검수', 제외할 이미지는 '대상 제외', 확정 시 '승인'을 누르세요."),
 			placement: "top",
 			skipBeacon: true,
 			scrollOffset: 100,

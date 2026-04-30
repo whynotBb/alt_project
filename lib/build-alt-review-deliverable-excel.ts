@@ -34,6 +34,8 @@ const IMAGE_COL_WIDTH_PX = 696;
 /** 이미지 박스: 세로 최대 10cm, 가로 최대 14cm (세로 10cm일 때 가로가 14cm 넘으면 가로 14cm에 맞춰 세로 축소) */
 const MAX_IMAGE_H_PX = 10 * PX_PER_CM;
 const MAX_IMAGE_W_PX = 14 * PX_PER_CM;
+/** 그림 자체 테두리 두께(px) */
+const IMAGE_STROKE_PX = 1;
 
 /** 엑셀 열 너비(문자 단위) ≈ 픽셀 환산 (Calibri 11 기준 근사) */
 function pixelsToExcelColumnWidth(px: number): number {
@@ -88,20 +90,58 @@ const BORDER_THIN_BLACK: Partial<ExcelJS.Borders> = {
   bottom: { style: "thin", color: { argb: "FF000000" } },
   right: { style: "thin", color: { argb: "FF000000" } },
 };
-
-const BORDER_THIN_LIGHT_GRAY: Partial<ExcelJS.Borders> = {
-  top: { style: "thin", color: { argb: "FFD9D9D9" } },
-  left: { style: "thin", color: { argb: "FFD9D9D9" } },
-  bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
-  right: { style: "thin", color: { argb: "FFD9D9D9" } },
-};
-
 function applyBoxBorder(cell: ExcelJS.Cell): void {
   cell.border = BORDER_THIN_BLACK;
 }
 
-function applyImageBoxBorder(cell: ExcelJS.Cell): void {
-  cell.border = BORDER_THIN_LIGHT_GRAY;
+function clearImageCellBorder(cell: ExcelJS.Cell): void {
+  cell.border = {};
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(base64, "base64"));
+  }
+  const bin = atob(base64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function addImageStrokeBase64(
+  base64: string,
+  extension: "png" | "jpeg" | "gif",
+): Promise<string> {
+  if (typeof window === "undefined" || typeof document === "undefined") return base64;
+  try {
+    const mime =
+      extension === "jpeg" ? "image/jpeg" : extension === "gif" ? "image/gif" : "image/png";
+    const bytes = Uint8Array.from(base64ToBytes(base64));
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("image load failed"));
+      el.src = url;
+    });
+    URL.revokeObjectURL(url);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return base64;
+
+    ctx.drawImage(img, 0, 0);
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = IMAGE_STROKE_PX;
+    ctx.strokeRect(IMAGE_STROKE_PX / 2, IMAGE_STROKE_PX / 2, canvas.width - IMAGE_STROKE_PX, canvas.height - IMAGE_STROKE_PX);
+    const outMime = extension === "jpeg" ? "image/jpeg" : "image/png";
+    return canvas.toDataURL(outMime).replace(/^data:image\/[a-zA-Z+]+;base64,/, "");
+  } catch {
+    return base64;
+  }
 }
 
 const TITLE_FILL: ExcelJS.Fill = {
@@ -114,6 +154,8 @@ export type AltReviewDeliverableExcelRow = {
   name: string;
   /** C열 경로 표기가 name 규칙과 다를 때 강제 사용 */
   pathLabel?: string;
+  /** D열에 직접 쓸 소스코드(여러 줄 누적) */
+  sourceCode?: string;
   imageBase64?: string;
   imageExtension?: "png" | "jpeg" | "gif";
   /** 원본 픽셀 크기(비율 계산용) */
@@ -133,7 +175,7 @@ export async function buildAltReviewDeliverableExcel(
 ): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("산출물", {
-    views: [{ state: "frozen", ySplit: 2, topLeftCell: "A3", activeCell: "B3" }],
+    views: [{ state: "frozen", ySplit: 6, topLeftCell: "B7", activeCell: "B7" }],
   });
 
   sheet.getColumn(1).width = pixelsToExcelColumnWidth(28);
@@ -141,11 +183,18 @@ export async function buildAltReviewDeliverableExcel(
   sheet.getColumn(3).width = pixelsToExcelColumnWidth(696);
   sheet.getColumn(4).width = pixelsToExcelColumnWidth(752);
 
-  sheet.getCell("B2").value = "No.";
-  sheet.getCell("C2").value = "이미지 요소 내 이미지 또는 URL";
-  sheet.getCell("D2").value = "작성된 대체텍스트(alt속성이 포함된 이미지 요소의 소스코드)";
+  sheet.getCell("C2").value = "대체텍스트(alt속성) 기술서";
+  sheet.getCell("D2").value = "개발확인부서 OOO   담당자 OOO";
+  sheet.mergeCells("C3:D5");
+  sheet.getCell("C3").value =
+    "1. <img>, <area>, <input type=\"image\">등의 이미지 요소에 대해 모두 기술한다.\n" +
+    "2. alt 속성이 제공된 이미지 요소의 전체 소스 코드를 기술한다.";
 
-  for (const addr of ["B2", "C2", "D2"] as const) {
+  sheet.getCell("B6").value = "No.";
+  sheet.getCell("C6").value = "이미지 요소 내 이미지 또는 URL";
+  sheet.getCell("D6").value = "작성된 대체텍스트(alt속성이 포함된 이미지 요소의 소스코드)";
+
+  for (const addr of ["B6", "C6", "D6"] as const) {
     const c = sheet.getCell(addr);
     c.font = { ...FONT_TITLE };
     c.alignment = { wrapText: true, vertical: "middle", horizontal: "center" };
@@ -153,10 +202,34 @@ export async function buildAltReviewDeliverableExcel(
     applyBoxBorder(c);
   }
 
+  const cellC2 = sheet.getCell("C2");
+  cellC2.font = { ...FONT_TITLE };
+  cellC2.alignment = { wrapText: true, vertical: "middle", horizontal: "center" };
+  applyBoxBorder(cellC2);
+
+  const cellD2 = sheet.getCell("D2");
+  cellD2.font = { ...FONT_TITLE };
+  cellD2.alignment = { wrapText: true, vertical: "middle", horizontal: "center" };
+  applyBoxBorder(cellD2);
+
+  const cellC3 = sheet.getCell("C3");
+  cellC3.font = { ...FONT_CONTENT };
+  cellC3.alignment = { wrapText: true, vertical: "top", horizontal: "left" };
+  applyBoxBorder(cellC3);
+  applyBoxBorder(sheet.getCell("D3"));
+  applyBoxBorder(sheet.getCell("C4"));
+  applyBoxBorder(sheet.getCell("D4"));
+  applyBoxBorder(sheet.getCell("C5"));
+  applyBoxBorder(sheet.getCell("D5"));
+
   sheet.getRow(2).height = rowHeightPointsFromPx(28);
+  sheet.getRow(3).height = rowHeightPointsFromPx(26);
+  sheet.getRow(4).height = rowHeightPointsFromPx(26);
+  sheet.getRow(5).height = rowHeightPointsFromPx(26);
+  sheet.getRow(6).height = rowHeightPointsFromPx(28);
 
   const allNames = rows.map((r) => r.name);
-  let excelRow = 3;
+  let excelRow = 7;
   let seq = 0;
 
   for (const row of rows) {
@@ -173,7 +246,7 @@ export async function buildAltReviewDeliverableExcel(
 
     const pathLabel = row.pathLabel ?? excelDeliverableImagePathLabel(row.name, allNames);
     const altText = row.excludedFromTarget ? "" : row.extractedText.trim();
-    const tag = buildImgTagForDeliverable(pathLabel, altText);
+    const tag = row.sourceCode?.trim() ? row.sourceCode : buildImgTagForDeliverable(pathLabel, altText);
 
     sheet.mergeCells(`D${rTop}:D${rBot}`);
     const cellD = sheet.getCell(`D${rTop}`);
@@ -195,12 +268,13 @@ export async function buildAltReviewDeliverableExcel(
 
     const ext = row.imageExtension ?? extensionForExcel(row.name);
     if (row.imageBase64 && ext) {
+      const withStroke = await addImageStrokeBase64(row.imageBase64, ext);
       const imageId = workbook.addImage({
-        base64: row.imageBase64,
+        base64: withStroke,
         extension: ext,
       });
       sheet.addImage(imageId, {
-        // 이미지 행 높이를 이미지보다 2px 크게 두고, 상단 1px 오프셋으로 세로 가운데 정렬
+        // 그림 자체에 검정 테두리를 그린 상태로 배치
         tl: {
           col: 2 + IMAGE_X_OFFSET_PX / IMAGE_COL_WIDTH_PX,
           row: rTop - 1 + 1 / rowImageHeightPx,
@@ -209,13 +283,13 @@ export async function buildAltReviewDeliverableExcel(
       });
       const cellCImg = sheet.getCell(`C${rTop}`);
       cellCImg.font = { ...FONT_CONTENT };
-      applyImageBoxBorder(cellCImg);
+      clearImageCellBorder(cellCImg);
     } else {
       const cellCImg = sheet.getCell(`C${rTop}`);
       cellCImg.value = "[이미지 형식 미지원 또는 미리보기 없음]";
       cellCImg.alignment = { vertical: "middle", wrapText: true };
       cellCImg.font = { ...FONT_CONTENT, italic: true, color: { argb: "FF888888" } };
-      applyImageBoxBorder(cellCImg);
+      clearImageCellBorder(cellCImg);
       sheet.getRow(rTop).height = imageRowHeightPoints(Math.round(MAX_IMAGE_H_PX) + IMAGE_ROW_EXTRA_PX);
     }
 

@@ -7,6 +7,7 @@ import { ArrowRight, Ban, Check, ChevronDown, Copy, FileCode2, FolderOutput, Loa
 import JSZip from "jszip";
 import { List, type ListImperativeAPI } from "react-window";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,12 @@ import { SpellDiffPreview } from "@/components/spell-diff-preview";
 import type { SpellHit } from "@/types/spell-hit";
 import { getExistingAltFromHtmlForImage } from "@/lib/client/existing-alt-from-html";
 import { injectReviewedAltsIntoHtmlMarkup } from "@/lib/client/html-alt-inject-from-review";
-import { appendAltReviewExcelToJsZip, downloadAltReviewExcelFile } from "@/lib/client/append-alt-review-excel-to-zip";
+import { appendAltReviewExcelToJsZip, downloadAltReviewExcelFile, type DeliverableExportSortKind } from "@/lib/client/append-alt-review-excel-to-zip";
+import {
+	DELIVERABLE_EXPORT_SORT_OPTIONS,
+	shouldUseHtmlAssetForDeliverableExport,
+	sortItemsForDeliverableExport,
+} from "@/lib/client/deliverable-export-sort";
 import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
 import { ImageListRow } from "@/components/image-list-row";
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
@@ -93,6 +99,8 @@ export function ImageReviewWorkspace() {
 	const [spellHits, setSpellHits] = useState<SpellHit[]>([]);
 	const [spellBaseline, setSpellBaseline] = useState<string | null>(null);
 	const [exportLoading, setExportLoading] = useState(false);
+	const [deliverableDialogOpen, setDeliverableDialogOpen] = useState(false);
+	const [deliverableSortKind, setDeliverableSortKind] = useState<DeliverableExportSortKind>("filename");
 	const [imageReviewEnabled, setImageReviewEnabled] = useState(true);
 	const [ocrEngine, setOcrEngine] = useState<OcrEngineId>("google-vision");
 	const [spellPreviewHeightPx, setSpellPreviewHeightPx] = useState(SPELL_PREVIEW_DEFAULT_H);
@@ -110,9 +118,7 @@ export function ImageReviewWorkspace() {
 	const allReviewComplete = reviewTargetCount > 0 && reviewedCount === reviewTargetCount;
 	const hasOnlyHtml = items.length === 0 && htmlAssets.length > 0;
 	const canExportDeliverables = htmlAssets.length > 0 && (!imageReviewEnabled || allReviewComplete || hasOnlyHtml);
-	/** HTML 없이 이미지만 있는데 내보내기를 시도할 수 있는 상태(검수 ON이면 전부 완료된 경우만) */
-	const needsHtmlToExport = htmlAssets.length === 0 && items.length > 0 && (!imageReviewEnabled || allReviewComplete);
-	const canClickExportDeliverables = !exportLoading && !isParsingZip && (canExportDeliverables || needsHtmlToExport);
+	const canClickExportDeliverables = !exportLoading && !isParsingZip && canExportDeliverables;
 
 	const itemsRef = useRef<ImageItem[]>([]);
 	itemsRef.current = items;
@@ -544,6 +550,45 @@ export function ImageReviewWorkspace() {
 		});
 	}, [selectedId]);
 
+	const handleApproveAll = useCallback(() => {
+		setItems((prev) => {
+			if (prev.length === 0) return prev;
+			let changed = false;
+			const next = prev.map((it) => {
+				if (it.excludedFromTarget || it.reviewed) return it;
+				changed = true;
+				return { ...it, reviewed: true };
+			});
+			if (!changed) return prev;
+			setHtmlAssets((hprev) =>
+				hprev.map((h) => ({
+					...h,
+					content: injectReviewedAltsIntoHtmlMarkup(h.originalContent ?? h.content, next, h.relativePath),
+				})),
+			);
+			return next;
+		});
+	}, []);
+
+	const handleUndoJudgment = useCallback((id: string) => {
+		setItems((prev) => {
+			const cur = prev.find((i) => i.id === id);
+			if (!cur || (!cur.excludedFromTarget && !cur.reviewed)) return prev;
+			const next = prev.map((it) => {
+				if (it.id !== id) return it;
+				if (it.excludedFromTarget) return { ...it, excludedFromTarget: false, reviewed: false };
+				return { ...it, reviewed: false };
+			});
+			setHtmlAssets((hprev) =>
+				hprev.map((h) => ({
+					...h,
+					content: injectReviewedAltsIntoHtmlMarkup(h.originalContent ?? h.content, next, h.relativePath),
+				})),
+			);
+			return next;
+		});
+	}, []);
+
 	const openFilePicker = useCallback(() => {
 		inputRef.current?.click();
 	}, []);
@@ -565,72 +610,90 @@ export function ImageReviewWorkspace() {
 		setCopyFlash(false);
 	}, []);
 
-	const handleExportDeliverables = useCallback(async () => {
-		const snapshotItems = itemsRef.current;
-		const snapshotHtml = htmlAssetsRef.current;
-		const targets = snapshotItems.filter((i) => !i.excludedFromTarget);
-		if (snapshotHtml.length === 0) {
-			const reviewReady = !imageReviewEnabled || (targets.length > 0 && targets.every((i) => i.reviewed));
-			if (snapshotItems.length > 0 && reviewReady) {
-				setSideNotice("산출물을 만들려면 HTML이 필요합니다. HTML 파일을 추가하거나 ZIP으로 업로드해 주세요.");
+	const handleExportDeliverables = useCallback(
+		async (exportSortKind: DeliverableExportSortKind) => {
+			const snapshotItems = itemsRef.current;
+			const snapshotHtml = htmlAssetsRef.current;
+			const targets = snapshotItems.filter((i) => !i.excludedFromTarget);
+			if (snapshotHtml.length === 0) {
+				const reviewReady = !imageReviewEnabled || (targets.length > 0 && targets.every((i) => i.reviewed));
+				if (snapshotItems.length > 0 && reviewReady) {
+					setSideNotice("산출물을 만들려면 HTML이 필요합니다. HTML 파일을 추가하거나 ZIP으로 업로드해 주세요.");
+				}
+				return;
 			}
-			return;
-		}
-		if (!imageReviewEnabled) {
+			const sortedHtml = sortItemsForDeliverableExport(
+				snapshotHtml
+					.filter((h) => shouldUseHtmlAssetForDeliverableExport(h.relativePath, exportSortKind))
+					.map((h) => ({ name: h.relativePath, asset: h })),
+				exportSortKind,
+			).map((x) => x.asset);
+			const sortedImages = sortItemsForDeliverableExport(snapshotItems, exportSortKind);
+			const excelOptions = { exportSortKind };
+
+			if (!imageReviewEnabled) {
+				setExportLoading(true);
+				setSideNotice(null);
+				try {
+					await downloadAltReviewExcelFile(snapshotItems, snapshotHtml, {
+						preferHtmlTagRows: true,
+						...excelOptions,
+					});
+				} catch (e) {
+					setSideNotice(e instanceof Error ? e.message : "엑셀 추출에 실패했습니다.");
+				} finally {
+					setExportLoading(false);
+				}
+				return;
+			}
+			const htmlOnly = snapshotItems.length === 0;
+			if (!htmlOnly && targets.length === 0) return;
+			if (!htmlOnly && !targets.every((i) => i.reviewed)) return;
+
 			setExportLoading(true);
 			setSideNotice(null);
 			try {
-				// 이미지 검수 OFF: ZIP 없이 엑셀만 내리되, 업로드된 이미지는 그대로 엑셀에 포함
-				await downloadAltReviewExcelFile(snapshotItems, snapshotHtml, {
-					preferHtmlTagRows: true,
-				});
+				const zip = new JSZip();
+
+				for (const h of sortedHtml) {
+					const markup = injectReviewedAltsIntoHtmlMarkup(h.originalContent ?? h.content, snapshotItems, h.relativePath);
+					zip.file(h.relativePath.replace(/\\/g, "/"), markup);
+				}
+
+				for (const it of sortedImages) {
+					const path = it.name.replace(/\\/g, "/");
+					const res = await fetch(it.url);
+					if (!res.ok) throw new Error(`이미지를 읽지 못했습니다: ${path}`);
+					const buf = await res.arrayBuffer();
+					zip.file(path, buf);
+				}
+
+				await appendAltReviewExcelToJsZip(zip, snapshotItems, snapshotHtml, excelOptions);
+
+				const blob = await zip.generateAsync({ type: "blob" });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = `alt-review-export-${new Date().toISOString().slice(0, 10)}.zip`;
+				a.rel = "noopener";
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				URL.revokeObjectURL(url);
 			} catch (e) {
-				setSideNotice(e instanceof Error ? e.message : "엑셀 추출에 실패했습니다.");
+				setSideNotice(e instanceof Error ? e.message : "산출물보내기에 실패했습니다.");
 			} finally {
 				setExportLoading(false);
 			}
-			return;
-		}
-		const htmlOnly = snapshotItems.length === 0;
-		if (!htmlOnly && targets.length === 0) return;
-		if (!htmlOnly && !targets.every((i) => i.reviewed)) return;
+		},
+		[imageReviewEnabled],
+	);
 
-		setExportLoading(true);
-		setSideNotice(null);
-		try {
-			const zip = new JSZip();
-
-			for (const h of snapshotHtml) {
-				const markup = injectReviewedAltsIntoHtmlMarkup(h.originalContent ?? h.content, snapshotItems, h.relativePath);
-				zip.file(h.relativePath.replace(/\\/g, "/"), markup);
-			}
-
-			for (const it of snapshotItems) {
-				const path = it.name.replace(/\\/g, "/");
-				const res = await fetch(it.url);
-				if (!res.ok) throw new Error(`이미지를 읽지 못했습니다: ${path}`);
-				const buf = await res.arrayBuffer();
-				zip.file(path, buf);
-			}
-
-			await appendAltReviewExcelToJsZip(zip, snapshotItems, snapshotHtml);
-
-			const blob = await zip.generateAsync({ type: "blob" });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = `alt-review-export-${new Date().toISOString().slice(0, 10)}.zip`;
-			a.rel = "noopener";
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			URL.revokeObjectURL(url);
-		} catch (e) {
-			setSideNotice(e instanceof Error ? e.message : "산출물보내기에 실패했습니다.");
-		} finally {
-			setExportLoading(false);
-		}
-	}, [imageReviewEnabled]);
+	const onClickExportDeliverables = useCallback(() => {
+		if (!canClickExportDeliverables) return;
+		setDeliverableSortKind("filename");
+		setDeliverableDialogOpen(true);
+	}, [canClickExportDeliverables]);
 
 	const handleJoyrideEvent = useCallback((data: EventData) => {
 		/** Joyride가 passive effect 안에서 이 콜백을 호출하므로, 여기서 `flushSync`를 쓰면 React가 오류를 냅니다. */
@@ -785,8 +848,20 @@ export function ImageReviewWorkspace() {
 						{items.length === 0 ? (
 							<p className="px-1 py-4 text-center text-sm text-muted-foreground">이미지·HTML·ZIP을 추가하면 목록이 여기에 표시됩니다. ZIP에는 HTML과 이미지가 함께 있어도 됩니다.</p>
 						) : (
-							<div className="min-h-0 h-full">
-								<List rowCount={items.length} rowHeight={LIST_ITEM_HEIGHT} rowComponent={ImageListRow} rowProps={{ items, itemNames: items.map((i) => i.name), selectedId, onSelect: setSelectedId, variant: "extract" }} listRef={listRef} defaultHeight={320} style={{ height: "100%" }} />
+							<div className="min-h-0 h-full space-y-2">
+								<div className="flex justify-end">
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="h-7 px-2 text-xs"
+										disabled={isParsingZip || exportLoading}
+										onClick={handleApproveAll}
+									>
+										전체 승인
+									</Button>
+								</div>
+								<List rowCount={items.length} rowHeight={LIST_ITEM_HEIGHT} rowComponent={ImageListRow} rowProps={{ items, itemNames: items.map((i) => i.name), selectedId, onSelect: setSelectedId, onUndoJudgment: handleUndoJudgment, variant: "extract" }} listRef={listRef} defaultHeight={320} style={{ height: "100%" }} />
 							</div>
 						)}
 					</div>
@@ -800,7 +875,7 @@ export function ImageReviewWorkspace() {
 								</span>
 							</span>
 						</button>
-						<Button type="button" data-tutorial="export-deliverables" variant="secondary" className="w-full gap-2" disabled={!canClickExportDeliverables} onClick={() => void handleExportDeliverables()}>
+						<Button type="button" data-tutorial="export-deliverables" variant="secondary" className="w-full gap-2 disabled:opacity-40" disabled={!canClickExportDeliverables} onClick={onClickExportDeliverables}>
 							{exportLoading ? <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> : <FolderOutput className="size-4 shrink-0" aria-hidden />}
 							산출물보내기
 						</Button>
@@ -1044,12 +1119,12 @@ export function ImageReviewWorkspace() {
 								)}
 							</div>
 							<div className="flex shrink-0 flex-wrap items-center justify-end gap-2" data-tutorial="review-actions">
+								<Button type="button" variant="outline" onClick={handleDeferReview} disabled={items.length === 0}>
+									나중에 검수
+								</Button>
 								<Button type="button" variant="outline" onClick={handleExcludeFromTarget} disabled={!selected || selected.excludedFromTarget}>
 									<Ban className="size-4" aria-hidden />
 									대상 제외
-								</Button>
-								<Button type="button" variant="outline" onClick={handleDeferReview} disabled={items.length === 0}>
-									나중에 검수
 								</Button>
 								<Button type="button" onClick={handleApprove} disabled={!selected || selected.excludedFromTarget}>
 									<Check className="size-4" aria-hidden />
@@ -1060,6 +1135,50 @@ export function ImageReviewWorkspace() {
 					</footer>
 				</div>
 			</div>
+			<Dialog open={deliverableDialogOpen} onOpenChange={setDeliverableDialogOpen}>
+				<DialogContent className="gap-3 sm:max-w-xs" showCloseButton>
+					<DialogHeader>
+						<DialogTitle>산출물 정렬</DialogTitle>
+						<DialogDescription>엑셀과 ZIP에 넣을 이미지·HTML 순서 기준을 선택합니다.</DialogDescription>
+					</DialogHeader>
+					<div className="grid gap-1.5" role="radiogroup" aria-label="산출물 종류">
+						{DELIVERABLE_EXPORT_SORT_OPTIONS.map((opt) => {
+							const selected = deliverableSortKind === opt.kind;
+							return (
+								<button
+									key={opt.kind}
+									type="button"
+									role="radio"
+									aria-checked={selected}
+									className={cn(
+										"flex w-full items-center rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors",
+										selected ? "border-primary bg-primary/8 text-foreground" : "border-border bg-background hover:bg-muted/60",
+									)}
+									onClick={() => setDeliverableSortKind(opt.kind)}
+								>
+									{opt.label}
+								</button>
+							);
+						})}
+					</div>
+					<div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+						<Button type="button" variant="outline" onClick={() => setDeliverableDialogOpen(false)}>
+							취소
+						</Button>
+						<Button
+							type="button"
+							disabled={exportLoading}
+							onClick={() => {
+								setDeliverableDialogOpen(false);
+								void handleExportDeliverables(deliverableSortKind);
+							}}
+						>
+							보내기
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
+
 			<Joyride
 				run={runTutorialJoyride}
 				steps={tutorialSteps}

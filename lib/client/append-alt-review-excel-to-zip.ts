@@ -3,12 +3,21 @@
 import type JSZip from "jszip";
 import {
   type AltReviewDeliverableExcelRow,
+  buildImgTagForDeliverable,
   buildAltReviewDeliverableExcel,
   excelDeliverableImagePathLabel,
   rowsForAltReviewDeliverableExcel,
   uint8ToBase64,
 } from "@/lib/build-alt-review-deliverable-excel";
+import {
+  type DeliverableExportSortKind,
+  shouldUseHtmlAssetForDeliverableExport,
+  sortItemsForDeliverableExport,
+  sortDeliverableExcelRows,
+} from "@/lib/client/deliverable-export-sort";
 import { normalizeZipRelativePath, resolveImgSrcToZipRelativeKey } from "@/lib/client/resolve-html-img-src";
+
+export type { DeliverableExportSortKind };
 
 export type DeliverableExcelItemInput = {
   name: string;
@@ -25,6 +34,8 @@ export type DeliverableExcelHtmlInput = {
 type ResolveRowsOptions = {
   /** true면 OCR/검수 텍스트를 쓰지 않고 HTML img 태그만으로 엑셀 행 생성 */
   preferHtmlTagRows?: boolean;
+  /** 산출물 엑셀 행 순서 */
+  exportSortKind?: DeliverableExportSortKind;
 };
 
 function extensionForExcel(name: string): "png" | "jpeg" | "gif" | null {
@@ -54,6 +65,8 @@ async function buildRowsFromHtmlAssets(
   items: DeliverableExcelItemInput[],
 ): Promise<AltReviewDeliverableExcelRow[]> {
   const itemByNormName = new Map<string, DeliverableExcelItemInput>();
+  /** HTML 파일별로 동일 이미지만 D열에 누적 (다른 HTML의 같은 파일은 별 행) */
+  const rowIndexByHtmlAndAsset = new Map<string, number>();
   const allItemNames = items.map((it) => it.name);
   const hasImgFolder = allItemNames.some((n) => {
     const lower = n.replace(/\\/g, "/").toLowerCase();
@@ -62,9 +75,8 @@ async function buildRowsFromHtmlAssets(
   for (const it of items) {
     itemByNormName.set(normalizeZipRelativePath(it.name), it);
   }
-  const sorted = [...htmlAssets].sort((a, b) => a.relativePath.localeCompare(b.relativePath));
   const rows: AltReviewDeliverableExcelRow[] = [];
-  for (const html of sorted) {
+  for (const html of htmlAssets) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html.content, "text/html");
     const imgs = Array.from(doc.querySelectorAll("img[src]"));
@@ -77,6 +89,8 @@ async function buildRowsFromHtmlAssets(
       if (altAttr === null || altAttr.trim().length === 0) continue;
       const resolved = resolveImgSrcToZipRelativeKey(html.relativePath, src);
       const matched = resolved ? itemByNormName.get(resolved) : undefined;
+      // 검수에서 "대상 제외"한 파일은 산출물 엑셀에서 제외
+      if (matched?.excludedFromTarget) continue;
       let imageBase64: string | undefined;
       let imageExtension: "png" | "jpeg" | "gif" | undefined;
       let imagePixelWidth: number | undefined;
@@ -103,23 +117,45 @@ async function buildRowsFromHtmlAssets(
           }
         }
       }
-      const fallbackFileName = src.split("/").pop() ?? src;
+      const fallbackFileName = src.replace(/\\/g, "/").split("/").pop() ?? src;
       const pathLabel = matched
         ? excelDeliverableImagePathLabel(matched.name, allItemNames)
         : hasImgFolder
           ? `img/${fallbackFileName}`
           : fallbackFileName;
+      const sourceCode = buildImgTagForDeliverable(pathLabel, altAttr.trim());
+      const assetKey =
+        matched != null
+          ? normalizeZipRelativePath(matched.name)
+          : resolved ?? normalizeZipRelativePath(src.replace(/\\/g, "/"));
+      const dedupePathKey = `${normalizeZipRelativePath(html.relativePath)}::${assetKey}`;
+
+      const existingRowIndex = rowIndexByHtmlAndAsset.get(dedupePathKey);
+      if (existingRowIndex !== undefined) {
+        const prev = rows[existingRowIndex]!;
+        const mergedSource = prev.sourceCode?.trim()
+          ? `${prev.sourceCode}\n${sourceCode}`
+          : sourceCode;
+        rows[existingRowIndex] = {
+          ...prev,
+          sourceCode: mergedSource,
+          extractedText: mergedSource,
+        };
+        continue;
+      }
 
       rows.push({
         name: matched?.name ?? `${html.relativePath}#img-${idx + 1}`,
         pathLabel,
+        sourceCode,
         imageBase64,
         imageExtension,
         imagePixelWidth,
         imagePixelHeight,
-        extractedText: altAttr.trim(),
+        extractedText: sourceCode,
         excludedFromTarget: false,
       });
+      rowIndexByHtmlAndAsset.set(dedupePathKey, rows.length - 1);
     }
   }
   return rows;
@@ -130,14 +166,24 @@ async function resolveDeliverableRows(
   htmlAssets?: DeliverableExcelHtmlInput[],
   options?: ResolveRowsOptions,
 ): Promise<AltReviewDeliverableExcelRow[]> {
-  if (options?.preferHtmlTagRows) {
-    if (!htmlAssets || htmlAssets.length === 0) return [];
-    return buildRowsFromHtmlAssets(htmlAssets, items);
+  const exportSortKind = options?.exportSortKind;
+  const preparedHtmlAssets =
+    htmlAssets && exportSortKind
+      ? sortItemsForDeliverableExport(
+          htmlAssets.filter((h) => shouldUseHtmlAssetForDeliverableExport(h.relativePath, exportSortKind)).map((h) => ({ name: h.relativePath, asset: h })),
+          exportSortKind,
+        ).map((x) => x.asset)
+      : htmlAssets;
+
+  /** HTML이 있으면 항상 HTML 순서·중복 누적 규칙으로 행 생성 (이미지 목록만으로 먼저 반환하면 누적이 깨짐) */
+  if (preparedHtmlAssets && preparedHtmlAssets.length > 0) {
+    return buildRowsFromHtmlAssets(preparedHtmlAssets, items);
   }
-  const itemRows = await rowsForAltReviewDeliverableExcel(items);
-  if (itemRows.length > 0) return itemRows;
-  if (!htmlAssets || htmlAssets.length === 0) return itemRows;
-  return buildRowsFromHtmlAssets(htmlAssets, items);
+
+  if (options?.preferHtmlTagRows) {
+    return [];
+  }
+  return rowsForAltReviewDeliverableExcel(items);
 }
 
 /** ZIP 산출물에 엑셀 파일을 추가합니다. (기본 파일명: alt-accessibility-deliverable.xlsx) */
@@ -148,7 +194,13 @@ export async function appendAltReviewExcelToJsZip(
   options?: ResolveRowsOptions,
   xlsxPath = "alt-accessibility-deliverable.xlsx",
 ): Promise<void> {
-  const rows = await resolveDeliverableRows(items, htmlAssets, options);
+  const rowsRaw = await resolveDeliverableRows(items, htmlAssets, options);
+  const rows =
+    options?.exportSortKind !== undefined &&
+    options.exportSortKind !== "daldal" &&
+    !options.preferHtmlTagRows
+      ? sortDeliverableExcelRows(rowsRaw, options.exportSortKind)
+      : rowsRaw;
   const ab = await buildAltReviewDeliverableExcel(rows);
   zip.file(xlsxPath, ab);
 }
@@ -160,7 +212,13 @@ export async function downloadAltReviewExcelFile(
   options?: ResolveRowsOptions,
   filename = `alt-accessibility-deliverable-${new Date().toISOString().slice(0, 10)}.xlsx`,
 ): Promise<void> {
-  const rows = await resolveDeliverableRows(items, htmlAssets, options);
+  const rowsRaw = await resolveDeliverableRows(items, htmlAssets, options);
+  const rows =
+    options?.exportSortKind !== undefined &&
+    options.exportSortKind !== "daldal" &&
+    !options.preferHtmlTagRows
+      ? sortDeliverableExcelRows(rowsRaw, options.exportSortKind)
+      : rowsRaw;
   const ab = await buildAltReviewDeliverableExcel(rows);
   const blob = new Blob([ab], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
