@@ -40,10 +40,38 @@ function daldalHtmlRank(path: string): number {
   return 4;
 }
 
-export function shouldUseHtmlAssetForDeliverableExport(path: string, kind: DeliverableExportSortKind): boolean {
-  if (kind !== "daldal") return true;
+/** 고객보답: Customer_web → Customer_m → 나머지(파일명 순) */
+function customerReplyHtmlRank(path: string): number {
   const base = basenameKey(path).toLowerCase();
-  return !base.includes("daldal_app");
+  if (base.startsWith("customer_web")) return 0;
+  if (base.startsWith("customer_m")) return 1;
+  return 2;
+}
+
+/** 블루보틀: bluebottle.html → bluebottle_mobile* → 나머지(경로 순), _app 제외 */
+function bluebottleHtmlRank(path: string): number {
+  const base = basenameKey(path).toLowerCase();
+  if (base.includes("bluebottle_app")) return 99;
+  if (base === "bluebottle.html") return 0;
+  if (base.startsWith("bluebottle_mobile")) return 1;
+  return 2;
+}
+
+/** 컬처앤모어: CultureAndMore.html → CultureAndMore_mobile* → 나머지(경로 순), _app 제외 */
+function cultureMoreHtmlRank(path: string): number {
+  const base = basenameKey(path).toLowerCase();
+  if (base.includes("cultureandmore_app")) return 99;
+  if (base === "cultureandmore.html") return 0;
+  if (base.startsWith("cultureandmore_mobile")) return 1;
+  return 2;
+}
+
+export function shouldUseHtmlAssetForDeliverableExport(path: string, kind: DeliverableExportSortKind): boolean {
+  const base = basenameKey(path).toLowerCase();
+  if (kind === "daldal") return !base.includes("daldal_app");
+  if (kind === "bluebottle") return !base.includes("bluebottle_app");
+  if (kind === "culture_more") return !base.includes("cultureandmore_app");
+  return true;
 }
 
 /** 선택한 종류에 해당하는 경로면 정렬 시 앞쪽으로 모읍니다. (`filename` 제외) */
@@ -53,13 +81,20 @@ export function pathMatchesDeliverableSortKind(path: string, kind: DeliverableEx
     case "daldal":
       return p.includes("달달") || p.includes("daldal");
     case "customer_reply":
-      return p.includes("고객보답") || p.includes("gokam") || p.includes("customer_reply");
+      return (
+        p.includes("고객보답") ||
+        p.includes("gokam") ||
+        p.includes("customer_reply") ||
+        p.includes("customer_web") ||
+        p.includes("customer_m")
+      );
     case "bluebottle":
       return p.includes("블루보틀") || p.includes("bluebottle") || p.includes("blue-bottle") || p.includes("blue_bottle");
     case "culture_more":
       return (
         p.includes("컬처앤모어") ||
         p.includes("culture") ||
+        p.includes("cultureandmore") ||
         p.includes("앤모어") ||
         p.includes("andmore") ||
         p.includes("and_more")
@@ -76,6 +111,30 @@ export function sortItemsForDeliverableExport<T extends { name: string }>(items:
     return [...items].sort((a, b) => {
       const ra = daldalHtmlRank(a.name);
       const rb = daldalHtmlRank(b.name);
+      if (ra !== rb) return ra - rb;
+      return normPath(a.name).localeCompare(normPath(b.name), "ko");
+    });
+  }
+  if (kind === "customer_reply") {
+    return [...items].sort((a, b) => {
+      const ra = customerReplyHtmlRank(a.name);
+      const rb = customerReplyHtmlRank(b.name);
+      if (ra !== rb) return ra - rb;
+      return normPath(a.name).localeCompare(normPath(b.name), "ko");
+    });
+  }
+  if (kind === "bluebottle") {
+    return [...items].sort((a, b) => {
+      const ra = bluebottleHtmlRank(a.name);
+      const rb = bluebottleHtmlRank(b.name);
+      if (ra !== rb) return ra - rb;
+      return normPath(a.name).localeCompare(normPath(b.name), "ko");
+    });
+  }
+  if (kind === "culture_more") {
+    return [...items].sort((a, b) => {
+      const ra = cultureMoreHtmlRank(a.name);
+      const rb = cultureMoreHtmlRank(b.name);
       if (ra !== rb) return ra - rb;
       return normPath(a.name).localeCompare(normPath(b.name), "ko");
     });

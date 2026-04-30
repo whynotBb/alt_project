@@ -174,7 +174,7 @@ export async function buildAltReviewDeliverableExcel(
   rows: AltReviewDeliverableExcelRow[],
 ): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("산출물", {
+  const sheet = workbook.addWorksheet("Sheet1", {
     views: [{ state: "frozen", ySplit: 6, topLeftCell: "B7", activeCell: "B7" }],
   });
 

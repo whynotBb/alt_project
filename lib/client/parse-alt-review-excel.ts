@@ -58,19 +58,21 @@ function extractSrcFromImgTagCell(htmlOrTag: string): string {
 }
 
 /**
- * ALT 작성 산출물 엑셀(시트 `산출물` 또는 첫 시트)에서
+ * ALT 작성 산출물 엑셀(시트 `Sheet1`, 구버전 `산출물`, 또는 첫 시트)에서
  * C열 경로 → `pathLabelLookupKey` → 대체텍스트(alt) 맵을 만듭니다.
  */
 export async function parseAltReviewDeliverableExcel(file: File): Promise<Map<string, string>> {
 	const buf = await file.arrayBuffer();
 	const wb = new ExcelJS.Workbook();
 	await wb.xlsx.load(buf);
-	const sheet = wb.getWorksheet("산출물") ?? wb.worksheets[0];
+	const sheet = wb.getWorksheet("Sheet1") ?? wb.getWorksheet("산출물") ?? wb.worksheets[0];
 	const map = new Map<string, string>();
 	if (!sheet) return map;
 
 	const maxRow = sheet.rowCount || 0;
-	let row = 3;
+	/** 본문 표: 신규 양식은 B6=`No.` 다음 7행부터, 구 양식은 3행부터 */
+	const b6Header = cellToPlainString(sheet.getCell("B6")).trim();
+	let row = b6Header === "No." ? 7 : 3;
 	while (row <= maxRow) {
 		const pathRow = row + 1;
 		const pathCell = sheet.getCell(`C${pathRow}`);

@@ -198,6 +198,9 @@ export async function appendAltReviewExcelToJsZip(
   const rows =
     options?.exportSortKind !== undefined &&
     options.exportSortKind !== "daldal" &&
+    options.exportSortKind !== "customer_reply" &&
+    options.exportSortKind !== "bluebottle" &&
+    options.exportSortKind !== "culture_more" &&
     !options.preferHtmlTagRows
       ? sortDeliverableExcelRows(rowsRaw, options.exportSortKind)
       : rowsRaw;
@@ -216,6 +219,9 @@ export async function downloadAltReviewExcelFile(
   const rows =
     options?.exportSortKind !== undefined &&
     options.exportSortKind !== "daldal" &&
+    options.exportSortKind !== "customer_reply" &&
+    options.exportSortKind !== "bluebottle" &&
+    options.exportSortKind !== "culture_more" &&
     !options.preferHtmlTagRows
       ? sortDeliverableExcelRows(rowsRaw, options.exportSortKind)
       : rowsRaw;
