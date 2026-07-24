@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { extractZipAssets, isZipFile, MAX_HTML_ENTRIES, zipArchiveLabel } from "@/lib/client/extract-zip-assets";
 import { getExistingAltFromHtmlForImage } from "@/lib/client/existing-alt-from-html";
-import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
+import { excelDeliverableImagePathLabel, stripArchivePrefix } from "@/lib/client/deliverable-image-path-label";
 import { pathLabelLookupKey, parseAltReviewDeliverableExcel } from "@/lib/client/parse-alt-review-excel";
 import { ImageListRow } from "@/components/image-list-row";
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
@@ -138,9 +138,25 @@ function isExcelUploadFile(file: File): boolean {
 	return file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || n.endsWith(".xlsx");
 }
 
+/**
+ * 이미지 하나에 대한 엑셀 매칭 후보 키(중복 제거).
+ * - 폴더가 보존된 실제 경로(예: images/foo.jpg): `img/` 폴더만 보존하는
+ *   excelDeliverableImagePathLabel 규칙 이전에 만들어진, 폴더 포함 전체 경로가
+ *   그대로 들어 있는 엑셀과의 매칭용.
+ * - 라벨 규칙 기반 경로: 현재 엑셀 생성 규칙과 동일한 값.
+ */
+function excelCandidateKeysForItem(name: string, allNames: string[]): string[] {
+	const fullPathKey = pathLabelLookupKey(stripArchivePrefix(name));
+	const labelKey = pathLabelLookupKey(excelDeliverableImagePathLabel(name, allNames));
+	return fullPathKey === labelKey ? [fullPathKey] : [fullPathKey, labelKey];
+}
+
 function excelAltForItem(name: string, allNames: string[], excelAltByPath: Map<string, string>): string {
-	const label = excelDeliverableImagePathLabel(name, allNames);
-	return excelAltByPath.get(pathLabelLookupKey(label)) ?? "";
+	for (const key of excelCandidateKeysForItem(name, allNames)) {
+		const hit = excelAltByPath.get(key);
+		if (hit !== undefined) return hit;
+	}
+	return "";
 }
 
 function fileNameOnly(pathLike: string): string {
@@ -615,7 +631,9 @@ export function AltInspectionWorkspace() {
 		const imageLabelByKey = new Map<string, string>();
 		for (const it of items) {
 			const label = excelDeliverableImagePathLabel(it.name, itemNames);
-			imageLabelByKey.set(pathLabelLookupKey(label), label);
+			for (const key of excelCandidateKeysForItem(it.name, itemNames)) {
+				imageLabelByKey.set(key, label);
+			}
 		}
 		const imageKeys = new Set(imageLabelByKey.keys());
 		const excelKeys = new Set(excelAltByPath.keys());

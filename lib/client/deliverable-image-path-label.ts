@@ -1,5 +1,5 @@
 /** ZIP/아카이브 기준 첫 경로 세그먼트(보통 압축 파일명) 제거 */
-function stripArchivePrefix(name: string): string {
+export function stripArchivePrefix(name: string): string {
 	const n = name.replace(/\\/g, "/").trim();
 	const i = n.indexOf("/");
 	if (i === -1) return n;
