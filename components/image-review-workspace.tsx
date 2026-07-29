@@ -21,7 +21,7 @@ import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-p
 import { ImageListRow } from "@/components/image-list-row";
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
 import { TUTORIAL_DUMMY_IMAGE_ITEMS } from "@/lib/tutorial-dummy";
-import { getTutorialJoyrideSteps, TUTORIAL_EXAMPLE_EXTRACTED_TEXT } from "@/lib/tutorial-joyride-steps";
+import { getTutorialJoyrideSteps, TUTORIAL_EXAMPLE_ALT_TEXT } from "@/lib/tutorial-joyride-steps";
 
 const MAX_IMAGES = 200;
 const LIST_ITEM_HEIGHT = 52;
@@ -554,7 +554,7 @@ export function ImageReviewWorkspace() {
 				afterCommit(() => {
 					setSpellHits([]);
 					setSpellBaseline(null);
-					setItems((prev) => prev.map((it) => (it.id === firstId ? { ...it, finalAlt: TUTORIAL_EXAMPLE_EXTRACTED_TEXT } : it)));
+					setItems((prev) => prev.map((it) => (it.id === firstId ? { ...it, finalAlt: TUTORIAL_EXAMPLE_ALT_TEXT } : it)));
 				});
 			}
 			/** Step 6 진행률: 검수 1건 완료된 것처럼 표시 */
@@ -697,7 +697,7 @@ export function ImageReviewWorkspace() {
 
 					<div className="min-h-0 flex-1">
 						<div className="grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-cols-2 lg:grid-rows-1 lg:divide-x lg:divide-y-0 lg:items-stretch">
-							<div data-tutorial="viewer-extract" className="flex w-full min-h-[200px] flex-col lg:h-full lg:min-h-0">
+							<div data-tutorial="image-viewer" className="flex w-full min-h-[200px] flex-col lg:h-full lg:min-h-0">
 								<div className="shrink-0 border-b border-border/80 bg-muted/30 px-3 py-2">
 									<div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
 									{selected && selectedDeliverableLabel ? (

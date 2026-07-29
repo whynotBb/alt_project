@@ -4,7 +4,7 @@ import type { Step } from "react-joyride";
 export const TUTORIAL_JOYRIDE_STEP_IDS = {
 	upload: "tutorial-upload",
 	imageList: "tutorial-image-list",
-	viewerExtract: "tutorial-viewer-extract",
+	imageViewer: "tutorial-image-viewer",
 	finalAlt: "tutorial-final-alt",
 	reviewActions: "tutorial-review-actions",
 	progress: "tutorial-progress",
@@ -34,10 +34,10 @@ export function getTutorialJoyrideSteps(): Step[] {
 			scrollOffset: 120,
 		},
 		{
-			id: TUTORIAL_JOYRIDE_STEP_IDS.viewerExtract,
-			target: '[data-tutorial="viewer-extract"]',
-			title: "Step 3. 워크스페이스 (뷰어 & 추출)",
-			content: demo("이미지를 확대/축소하며 상세히 확인하고, AI가 추출한 텍스트를 바로 편집해 보세요."),
+			id: TUTORIAL_JOYRIDE_STEP_IDS.imageViewer,
+			target: '[data-tutorial="image-viewer"]',
+			title: "Step 3. 이미지 뷰어",
+			content: demo("이미지를 확대/축소하며 자세히 확인하세요."),
 			/** 타겟 기준 우측 + 세로는 타겟 중앙 정렬(Floating UI `right` 기본) */
 			placement: "right",
 			skipBeacon: true,
@@ -52,7 +52,7 @@ export function getTutorialJoyrideSteps(): Step[] {
 			id: TUTORIAL_JOYRIDE_STEP_IDS.finalAlt,
 			target: '[data-tutorial="final-alt"]',
 			title: "Step 4. 최종 ALT 확정",
-			content: demo("편집된 텍스트를 '최종 ALT'로 보내세요. 맞춤법 검사기로 완벽한 문장을 만들 수 있습니다."),
+			content: demo("이미지를 보고 대체텍스트를 직접 입력하세요. 맞춤법 검사기로 완벽한 문장을 만들 수 있습니다."),
 			placement: "auto",
 			skipBeacon: true,
 			scrollOffset: 100,
@@ -83,8 +83,8 @@ export function getTutorialJoyrideSteps(): Step[] {
 		{
 			id: TUTORIAL_JOYRIDE_STEP_IDS.exportDeliverables,
 			target: '[data-tutorial="export-deliverables"]',
-			title: "Step 8. 최종 산출물",
-			content: demo("작업이 완료된 HTML과 엑셀을 한 번에 다운로드하세요!"),
+			title: "Step 7. 최종 산출물",
+			content: demo("ALT 작성이 끝난 항목을 승인한 뒤, 엑셀 산출물을 다운로드하세요!"),
 			placement: "right",
 			skipBeacon: true,
 			scrollOffset: 120,
@@ -92,5 +92,5 @@ export function getTutorialJoyrideSteps(): Step[] {
 	];
 }
 
-/** Step 4 진입 시 추출 텍스트 칸에 넣는 예시 문구 */
-export const TUTORIAL_EXAMPLE_EXTRACTED_TEXT = "추출된 텍스트입니다";
+/** Step 4 진입 시 최종 ALT 칸에 넣는 예시 문구 */
+export const TUTORIAL_EXAMPLE_ALT_TEXT = "예시 대체텍스트입니다";
