@@ -65,7 +65,6 @@ export function ImageReviewWorkspace() {
 	const searchParams = useSearchParams();
 	const inputRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<ListImperativeAPI | null>(null);
-	const joyrideTutorialActiveRef = useRef(false);
 	const [runTutorialJoyride, setRunTutorialJoyride] = useState(false);
 	const tutorialSteps = useMemo(() => getTutorialJoyrideSteps(), []);
 	const [items, setItems] = useState<ImageItem[]>([]);
@@ -515,7 +514,6 @@ export function ImageReviewWorkspace() {
 		};
 
 		if (data.type === EVENTS.TOUR_START) {
-			joyrideTutorialActiveRef.current = true;
 			afterCommit(() => {
 				for (const it of itemsRef.current) {
 					if (it.url.startsWith("blob:")) URL.revokeObjectURL(it.url);
@@ -531,13 +529,11 @@ export function ImageReviewWorkspace() {
 		}
 
 		if (data.type === EVENTS.TOUR_END) {
-			joyrideTutorialActiveRef.current = false;
 			setRunTutorialJoyride(false);
 			return;
 		}
 
 		if (data.type === EVENTS.TOUR_STATUS && (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED)) {
-			joyrideTutorialActiveRef.current = false;
 			setRunTutorialJoyride(false);
 			return;
 		}
@@ -564,7 +560,7 @@ export function ImageReviewWorkspace() {
 					setItems((prev) => prev.map((it) => (it.id === firstId && !it.excludedFromTarget ? { ...it, reviewed: true } : it)));
 				});
 			}
-			/** Step 8 산출물: 더미 HTML + 전부 검수 완료로 두어 다운로드 플로우 유지 */
+			/** Step 7 산출물: 더미 HTML + 전부 검수 완료로 두어 다운로드 플로우 유지 */
 			if (data.index === 6) {
 				const demoHtml = '<!DOCTYPE html><html><body><img src="tutorial_1.png" alt="" /></body></html>';
 				afterCommit(() => {
@@ -683,7 +679,13 @@ export function ImageReviewWorkspace() {
 							{exportLoading ? <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> : <FolderOutput className="size-4 shrink-0" aria-hidden />}
 							산출물보내기
 						</Button>
-						{items.length > 0 && htmlAssets.length === 0 ? <p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">산출물 반영을 위해 HTML을 추가해 주세요.</p> : null}
+						{items.length > 0 ? (
+							htmlAssets.length === 0 ? (
+								<p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">산출물 반영을 위해 HTML을 추가해 주세요.</p>
+							) : (
+								<p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">승인한 항목({reviewedCount}개)만 엑셀에 포함됩니다.</p>
+							)
+						) : null}
 					</div>
 				</aside>
 
@@ -839,7 +841,7 @@ export function ImageReviewWorkspace() {
 				<DialogContent className="gap-3 sm:max-w-xs" showCloseButton>
 					<DialogHeader>
 						<DialogTitle>산출물 정렬</DialogTitle>
-						<DialogDescription>엑셀과 ZIP에 넣을 이미지·HTML 순서 기준을 선택합니다.</DialogDescription>
+						<DialogDescription>엑셀에 넣을 이미지·HTML 순서 기준을 선택합니다.</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-1.5" role="radiogroup" aria-label="산출물 종류">
 						{DELIVERABLE_EXPORT_SORT_OPTIONS.map((opt) => {
