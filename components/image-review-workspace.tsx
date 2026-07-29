@@ -3,42 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Joyride, EVENTS, STATUS, type EventData } from "react-joyride";
-import { ArrowRight, Ban, Check, ChevronDown, Copy, FileCode2, FolderOutput, Loader2, RefreshCw, SpellCheck2, Trash2, Upload, Wand2 } from "lucide-react";
-import JSZip from "jszip";
+import { Ban, Check, FileCode2, FolderOutput, Loader2, SpellCheck2, Trash2, Upload, Wand2 } from "lucide-react";
 import { List, type ListImperativeAPI } from "react-window";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { extractZipAssets, isHtmlUploadFile, isZipFile, MAX_HTML_ENTRIES, zipArchiveLabel } from "@/lib/client/extract-zip-assets";
-import { requestOcrForImageItem, type OcrEngineId } from "@/lib/client/ocr-image-fetch";
 import { applySpellHits } from "@/lib/client/apply-spell-hits";
 import { SpellDiffPreview } from "@/components/spell-diff-preview";
 import type { SpellHit } from "@/types/spell-hit";
 import { getExistingAltFromHtmlForImage } from "@/lib/client/existing-alt-from-html";
 import { injectReviewedAltsIntoHtmlMarkup } from "@/lib/client/html-alt-inject-from-review";
-import { appendAltReviewExcelToJsZip, downloadAltReviewExcelFile, type DeliverableExportSortKind } from "@/lib/client/append-alt-review-excel-to-zip";
-import {
-	DELIVERABLE_EXPORT_SORT_OPTIONS,
-	shouldUseHtmlAssetForDeliverableExport,
-	sortItemsForDeliverableExport,
-} from "@/lib/client/deliverable-export-sort";
+import { downloadAltReviewExcelFile, type DeliverableExportSortKind } from "@/lib/client/append-alt-review-excel-to-zip";
+import { DELIVERABLE_EXPORT_SORT_OPTIONS } from "@/lib/client/deliverable-export-sort";
 import { excelDeliverableImagePathLabel } from "@/lib/client/deliverable-image-path-label";
 import { ImageListRow } from "@/components/image-list-row";
 import { ImageViewerZoom } from "@/components/image-viewer-zoom";
 import { TUTORIAL_DUMMY_IMAGE_ITEMS } from "@/lib/tutorial-dummy";
 import { getTutorialJoyrideSteps, TUTORIAL_EXAMPLE_EXTRACTED_TEXT } from "@/lib/tutorial-joyride-steps";
-
-const OCR_ENGINE_OPTIONS: { value: OcrEngineId; label: string }[] = [
-	{ value: "google-vision", label: "구글 비전" },
-	{ value: "ocr-space", label: "OCR.space" },
-	{ value: "tesseract", label: "Tesseract(로컬전용)" },
-];
-
-function ocrEngineLabel(id: OcrEngineId): string {
-	return OCR_ENGINE_OPTIONS.find((o) => o.value === id)?.label ?? id;
-}
 
 const MAX_IMAGES = 200;
 const LIST_ITEM_HEIGHT = 52;
@@ -54,7 +37,6 @@ type ImageItem = {
 	id: string;
 	name: string;
 	url: string;
-	extractedText: string;
 	finalAlt: string;
 	reviewed: boolean;
 	excludedFromTarget: boolean;
@@ -65,7 +47,6 @@ function tutorialDummyToImageItems(): ImageItem[] {
 		id: d.id,
 		name: d.fileName,
 		url: d.publicPath,
-		extractedText: "",
 		finalAlt: "",
 		reviewed: false,
 		excludedFromTarget: false,
@@ -92,17 +73,13 @@ export function ImageReviewWorkspace() {
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [isParsingZip, setIsParsingZip] = useState(false);
 	const [sideNotice, setSideNotice] = useState<string | null>(null);
-	const [copyFlash, setCopyFlash] = useState(false);
 	const [dropActive, setDropActive] = useState(false);
-	const [ocrLoading, setOcrLoading] = useState(false);
 	const [spellLoading, setSpellLoading] = useState(false);
 	const [spellHits, setSpellHits] = useState<SpellHit[]>([]);
 	const [spellBaseline, setSpellBaseline] = useState<string | null>(null);
 	const [exportLoading, setExportLoading] = useState(false);
 	const [deliverableDialogOpen, setDeliverableDialogOpen] = useState(false);
 	const [deliverableSortKind, setDeliverableSortKind] = useState<DeliverableExportSortKind>("filename");
-	const [imageReviewEnabled, setImageReviewEnabled] = useState(true);
-	const [ocrEngine, setOcrEngine] = useState<OcrEngineId>("google-vision");
 	const [spellPreviewHeightPx, setSpellPreviewHeightPx] = useState(SPELL_PREVIEW_DEFAULT_H);
 	const spellPreviewResizeRef = useRef<{ pointerId: number; startY: number; startH: number } | null>(null);
 
@@ -115,9 +92,7 @@ export function ImageReviewWorkspace() {
 	const total = items.length;
 	const progressPct = reviewTargetCount > 0 ? Math.round((reviewedCount / reviewTargetCount) * 100) : 0;
 
-	const allReviewComplete = reviewTargetCount > 0 && reviewedCount === reviewTargetCount;
-	const hasOnlyHtml = items.length === 0 && htmlAssets.length > 0;
-	const canExportDeliverables = htmlAssets.length > 0 && (!imageReviewEnabled || allReviewComplete || hasOnlyHtml);
+	const canExportDeliverables = htmlAssets.length > 0;
 	const canClickExportDeliverables = !exportLoading && !isParsingZip && canExportDeliverables;
 
 	const itemsRef = useRef<ImageItem[]>([]);
@@ -155,61 +130,6 @@ export function ImageReviewWorkspace() {
 			return changed ? next : prev;
 		});
 	}, [htmlAssets]);
-
-	useEffect(() => {
-		if (!selectedId) {
-			setOcrLoading(false);
-			return;
-		}
-
-		if (!imageReviewEnabled) {
-			setOcrLoading(false);
-			return;
-		}
-
-		let cancelled = false;
-
-		const run = async () => {
-			if (joyrideTutorialActiveRef.current) {
-				setOcrLoading(false);
-				return;
-			}
-
-			const item = itemsRef.current.find((i) => i.id === selectedId);
-			if (!item) return;
-
-			if (item.excludedFromTarget) {
-				setOcrLoading(false);
-				return;
-			}
-
-			if (item.extractedText.trim() !== "") {
-				setOcrLoading(false);
-				return;
-			}
-
-			setOcrLoading(true);
-			setSideNotice(null);
-			try {
-				const result = await requestOcrForImageItem(item, ocrEngine);
-				if (cancelled) return;
-				if (result.ok) {
-					setSpellHits([]);
-					setSpellBaseline(null);
-					setItems((prev) => prev.map((it) => (it.id === selectedId ? { ...it, extractedText: result.text } : it)));
-				} else {
-					setSideNotice(result.message);
-				}
-			} finally {
-				if (!cancelled) setOcrLoading(false);
-			}
-		};
-
-		void run();
-		return () => {
-			cancelled = true;
-		};
-	}, [selectedId, ocrEngine, imageReviewEnabled]);
 
 	useEffect(() => {
 		setSpellHits([]);
@@ -265,7 +185,6 @@ export function ImageReviewWorkspace() {
 								id: crypto.randomUUID(),
 								name: `${base}/${img.relativePath}`,
 								url: URL.createObjectURL(img.blob),
-								extractedText: "",
 								finalAlt: "",
 								reviewed: false,
 								excludedFromTarget: false,
@@ -288,7 +207,6 @@ export function ImageReviewWorkspace() {
 							id: crypto.randomUUID(),
 							name: file.name,
 							url: URL.createObjectURL(file),
-							extractedText: "",
 							finalAlt: "",
 							reviewed: false,
 							excludedFromTarget: false,
@@ -339,60 +257,12 @@ export function ImageReviewWorkspace() {
 		[items.length],
 	);
 
-	const handleReExtract = useCallback(async () => {
-		if (!imageReviewEnabled) return;
-		const id = selectedId;
-		if (!id) return;
-		const item = itemsRef.current.find((i) => i.id === id);
-		if (!item) return;
-
-		setOcrLoading(true);
-		setSideNotice(null);
-		try {
-			const result = await requestOcrForImageItem(item, ocrEngine);
-			if (result.ok) {
-				setSpellHits([]);
-				setSpellBaseline(null);
-				setItems((prev) => prev.map((it) => (it.id === id ? { ...it, extractedText: result.text } : it)));
-			} else {
-				setSideNotice(result.message);
-			}
-		} finally {
-			setOcrLoading(false);
-		}
-	}, [selectedId, ocrEngine, imageReviewEnabled]);
-
-	const copyExtractedText = useCallback(async () => {
-		if (!selected) return;
-		try {
-			await navigator.clipboard.writeText(selected.extractedText);
-			setCopyFlash(true);
-			window.setTimeout(() => setCopyFlash(false), 2000);
-		} catch {
-			setSideNotice("클립보드에 복사하지 못했습니다. 브라우저 권한을 확인해 주세요.");
-		}
-	}, [selected]);
-
-	const updateSelectedText = useCallback(
-		(text: string) => {
-			setItems((prev) => prev.map((it) => (it.id === selectedId ? { ...it, extractedText: text } : it)));
-		},
-		[selectedId],
-	);
-
 	const updateSelectedFinalAlt = useCallback(
 		(text: string) => {
 			setItems((prev) => prev.map((it) => (it.id === selectedId ? { ...it, finalAlt: text } : it)));
 		},
 		[selectedId],
 	);
-
-	const applyExtractedToFinalAlt = useCallback(() => {
-		if (!selectedId || !selected) return;
-		setItems((prev) => prev.map((it) => (it.id === selectedId ? { ...it, finalAlt: selected.extractedText } : it)));
-		setSpellHits([]);
-		setSpellBaseline(null);
-	}, [selectedId, selected]);
 
 	/** 업로드 시점 HTML(`originalContent`)에서 매칭 img의 alt만 다시 읽어 최종 ALT에 넣습니다. */
 	const refreshFinalAltFromHtmlSource = useCallback(() => {
@@ -605,89 +475,32 @@ export function ImageReviewWorkspace() {
 		setSideNotice(null);
 		setSpellHits([]);
 		setSpellBaseline(null);
-		setOcrLoading(false);
 		setSpellLoading(false);
-		setCopyFlash(false);
 	}, []);
 
-	const handleExportDeliverables = useCallback(
-		async (exportSortKind: DeliverableExportSortKind) => {
-			const snapshotItems = itemsRef.current;
-			const snapshotHtml = htmlAssetsRef.current;
-			const targets = snapshotItems.filter((i) => !i.excludedFromTarget);
-			if (snapshotHtml.length === 0) {
-				const reviewReady = !imageReviewEnabled || (targets.length > 0 && targets.every((i) => i.reviewed));
-				if (snapshotItems.length > 0 && reviewReady) {
-					setSideNotice("산출물을 만들려면 HTML이 필요합니다. HTML 파일을 추가하거나 ZIP으로 업로드해 주세요.");
-				}
-				return;
+	const handleExportDeliverables = useCallback(async (exportSortKind: DeliverableExportSortKind) => {
+		const snapshotItems = itemsRef.current;
+		const snapshotHtml = htmlAssetsRef.current;
+		if (snapshotHtml.length === 0) {
+			if (snapshotItems.length > 0) {
+				setSideNotice("산출물을 만들려면 HTML이 필요합니다. HTML 파일을 추가하거나 ZIP으로 업로드해 주세요.");
 			}
-			const sortedHtml = sortItemsForDeliverableExport(
-				snapshotHtml
-					.filter((h) => shouldUseHtmlAssetForDeliverableExport(h.relativePath, exportSortKind))
-					.map((h) => ({ name: h.relativePath, asset: h })),
+			return;
+		}
+
+		setExportLoading(true);
+		setSideNotice(null);
+		try {
+			await downloadAltReviewExcelFile(snapshotItems, snapshotHtml, {
+				preferHtmlTagRows: true,
 				exportSortKind,
-			).map((x) => x.asset);
-			const sortedImages = sortItemsForDeliverableExport(snapshotItems, exportSortKind);
-			const excelOptions = { exportSortKind };
-
-			if (!imageReviewEnabled) {
-				setExportLoading(true);
-				setSideNotice(null);
-				try {
-					await downloadAltReviewExcelFile(snapshotItems, snapshotHtml, {
-						preferHtmlTagRows: true,
-						...excelOptions,
-					});
-				} catch (e) {
-					setSideNotice(e instanceof Error ? e.message : "엑셀 추출에 실패했습니다.");
-				} finally {
-					setExportLoading(false);
-				}
-				return;
-			}
-			const htmlOnly = snapshotItems.length === 0;
-			if (!htmlOnly && targets.length === 0) return;
-			if (!htmlOnly && !targets.every((i) => i.reviewed)) return;
-
-			setExportLoading(true);
-			setSideNotice(null);
-			try {
-				const zip = new JSZip();
-
-				for (const h of sortedHtml) {
-					const markup = injectReviewedAltsIntoHtmlMarkup(h.originalContent ?? h.content, snapshotItems, h.relativePath);
-					zip.file(h.relativePath.replace(/\\/g, "/"), markup);
-				}
-
-				for (const it of sortedImages) {
-					const path = it.name.replace(/\\/g, "/");
-					const res = await fetch(it.url);
-					if (!res.ok) throw new Error(`이미지를 읽지 못했습니다: ${path}`);
-					const buf = await res.arrayBuffer();
-					zip.file(path, buf);
-				}
-
-				await appendAltReviewExcelToJsZip(zip, snapshotItems, snapshotHtml, excelOptions);
-
-				const blob = await zip.generateAsync({ type: "blob" });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement("a");
-				a.href = url;
-				a.download = `alt-review-export-${new Date().toISOString().slice(0, 10)}.zip`;
-				a.rel = "noopener";
-				document.body.appendChild(a);
-				a.click();
-				a.remove();
-				URL.revokeObjectURL(url);
-			} catch (e) {
-				setSideNotice(e instanceof Error ? e.message : "산출물보내기에 실패했습니다.");
-			} finally {
-				setExportLoading(false);
-			}
-		},
-		[imageReviewEnabled],
-	);
+			});
+		} catch (e) {
+			setSideNotice(e instanceof Error ? e.message : "엑셀 추출에 실패했습니다.");
+		} finally {
+			setExportLoading(false);
+		}
+	}, []);
 
 	const onClickExportDeliverables = useCallback(() => {
 		if (!canClickExportDeliverables) return;
@@ -741,7 +554,7 @@ export function ImageReviewWorkspace() {
 				afterCommit(() => {
 					setSpellHits([]);
 					setSpellBaseline(null);
-					setItems((prev) => prev.map((it) => (it.id === firstId ? { ...it, extractedText: TUTORIAL_EXAMPLE_EXTRACTED_TEXT } : it)));
+					setItems((prev) => prev.map((it) => (it.id === firstId ? { ...it, finalAlt: TUTORIAL_EXAMPLE_EXTRACTED_TEXT } : it)));
 				});
 			}
 			/** Step 6 진행률: 검수 1건 완료된 것처럼 표시 */
@@ -752,7 +565,7 @@ export function ImageReviewWorkspace() {
 				});
 			}
 			/** Step 8 산출물: 더미 HTML + 전부 검수 완료로 두어 다운로드 플로우 유지 */
-			if (data.index === 7) {
+			if (data.index === 6) {
 				const demoHtml = '<!DOCTYPE html><html><body><img src="tutorial_1.png" alt="" /></body></html>';
 				afterCommit(() => {
 					setItems((prev) => prev.map((it) => (!it.excludedFromTarget ? { ...it, reviewed: true } : it)));
@@ -866,144 +679,36 @@ export function ImageReviewWorkspace() {
 						)}
 					</div>
 					<div className="shrink-0 border-t border-border/80 bg-card/90 p-2">
-						<button type="button" data-tutorial="image-review-toggle" role="switch" aria-checked={imageReviewEnabled} aria-label="이미지 검수 사용 여부" className="mb-2 flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors" disabled={exportLoading || isParsingZip} onClick={() => setImageReviewEnabled((prev) => !prev)}>
-							<span className="font-medium text-foreground">이미지 → 텍스트 추출</span>
-							<span className="flex items-center gap-2">
-								<span className="text-xs text-muted-foreground">{imageReviewEnabled ? "ON" : "OFF"}</span>
-								<span className={cn("relative inline-flex h-5 w-9 items-center rounded-full transition-colors", imageReviewEnabled ? "bg-primary" : "bg-muted")}>
-									<span className={cn("inline-block size-4 transform rounded-full bg-white transition-transform", imageReviewEnabled ? "translate-x-4" : "translate-x-0.5")} />
-								</span>
-							</span>
-						</button>
 						<Button type="button" data-tutorial="export-deliverables" variant="secondary" className="w-full gap-2 disabled:opacity-40" disabled={!canClickExportDeliverables} onClick={onClickExportDeliverables}>
 							{exportLoading ? <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> : <FolderOutput className="size-4 shrink-0" aria-hidden />}
 							산출물보내기
 						</Button>
-						{items.length > 0 && imageReviewEnabled && !canExportDeliverables ? <p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">{!allReviewComplete ? "검수 대상을 모두 승인해야 합니다." : "HTML 파일을 추가하거나 ZIP으로 업로드해 주세요."}</p> : null}
-						{items.length > 0 && !imageReviewEnabled && htmlAssets.length === 0 ? <p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">산출물 반영을 위해 HTML을 추가해 주세요.</p> : null}
+						{items.length > 0 && htmlAssets.length === 0 ? <p className="mt-1.5 px-0.5 text-center text-[10px] leading-snug text-muted-foreground">산출물 반영을 위해 HTML을 추가해 주세요.</p> : null}
 					</div>
 				</aside>
 
 				<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 					<header className="shrink-0 border-b border-border/80 bg-card/95 px-4 py-3 backdrop-blur-sm sm:px-5">
-						<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-							<div className="min-w-0">
-								<h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">대체텍스트 추출 및 편집</h1>
-								<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">{imageReviewEnabled ? "왼쪽 목록에서 파일을 추가한 뒤, 추출 텍스트와 최종 ALT를 편집·승인합니다." : "이미지 검수 OFF: 텍스트 추출 없이 최종 ALT만 편집합니다. (ZIP·HTML이 있으면 alt는 자동 반영됩니다.)"}</p>
-							</div>
-							{imageReviewEnabled ? (
-								<div className="flex shrink-0 flex-col gap-1 sm:items-end">
-									<Label id="ocr-engine-label" className="text-[10px] font-medium text-muted-foreground">
-										텍스트 추출 엔진
-									</Label>
-									<DropdownMenu>
-										<DropdownMenuTrigger type="button" disabled={ocrLoading || isParsingZip} aria-labelledby="ocr-engine-label" title={"구글 비전 : 무료 1,000장/월\nOCR.space : 무료 25,000장/월\nTesseract : 로컬 전용"} className={cn(buttonVariants({ variant: "outline", size: "default" }), "h-8 min-w-42 justify-between gap-1.5 px-2.5 text-xs font-normal shadow-sm", "data-disabled:pointer-events-none data-disabled:opacity-50")}>
-											<span className="min-w-0 truncate">{ocrEngineLabel(ocrEngine)}</span>
-											<ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
-										</DropdownMenuTrigger>
-										<DropdownMenuContent align="end" className="min-w-42">
-											<DropdownMenuRadioGroup
-												value={ocrEngine}
-												onValueChange={(v) => {
-													if (v === "tesseract" || v === "google-vision" || v === "ocr-space") setOcrEngine(v);
-												}}
-											>
-												{OCR_ENGINE_OPTIONS.map((opt) => (
-													<DropdownMenuRadioItem key={opt.value} value={opt.value} closeOnClick className="text-xs">
-														{opt.label}
-													</DropdownMenuRadioItem>
-												))}
-											</DropdownMenuRadioGroup>
-										</DropdownMenuContent>
-									</DropdownMenu>
-								</div>
-							) : null}
+						<div className="min-w-0">
+							<h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">대체텍스트(ALT) 편집</h1>
+							<p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:mt-1.5">왼쪽 목록에서 이미지·HTML·ZIP을 추가한 뒤 최종 ALT를 편집하고, 완료되면 엑셀 산출물을 다운로드하세요.</p>
 						</div>
 					</header>
 
 					<div className="min-h-0 flex-1">
-						<div className={cn("grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-rows-1 lg:divide-x lg:divide-y-0 lg:items-stretch", imageReviewEnabled ? "lg:grid-cols-3" : "lg:grid-cols-2")}>
-							<div data-tutorial="viewer-extract" className={cn("col-span-1 flex w-full min-h-[200px] flex-col divide-y divide-border/80 lg:h-full lg:min-h-0", imageReviewEnabled ? "lg:col-span-2 lg:flex-row lg:divide-x lg:divide-y-0" : "lg:col-span-1")}>
-								<div className="flex w-full min-h-[200px] flex-1 flex-col lg:min-h-0">
-									<div className="shrink-0 border-b border-border/80 bg-muted/30 px-3 py-2">
-										<div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
-										{selected && selectedDeliverableLabel ? (
-											<p className="mt-1.5 break-all text-[11px] font-medium leading-snug text-foreground/90" title={selectedDeliverableLabel !== selected.name ? `${selectedDeliverableLabel} — ${selected.name}` : selected.name}>
-												{selectedDeliverableLabel}
-											</p>
-										) : (
-											<p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">목록에서 이미지를 선택하면 파일명이 여기 표시됩니다.</p>
-										)}
-									</div>
-									<div className="flex min-h-0 flex-1 flex-col p-4">{selected ? <ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} /> : <p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>}</div>
+						<div className="grid h-full min-h-[min(45vh,380px)] grid-cols-1 divide-y divide-border/80 bg-card/30 lg:min-h-0 lg:grid-cols-2 lg:grid-rows-1 lg:divide-x lg:divide-y-0 lg:items-stretch">
+							<div data-tutorial="viewer-extract" className="flex w-full min-h-[200px] flex-col lg:h-full lg:min-h-0">
+								<div className="shrink-0 border-b border-border/80 bg-muted/30 px-3 py-2">
+									<div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">이미지 뷰어</div>
+									{selected && selectedDeliverableLabel ? (
+										<p className="mt-1.5 break-all text-[11px] font-medium leading-snug text-foreground/90" title={selectedDeliverableLabel !== selected.name ? `${selectedDeliverableLabel} — ${selected.name}` : selected.name}>
+											{selectedDeliverableLabel}
+										</p>
+									) : (
+										<p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">목록에서 이미지를 선택하면 파일명이 여기 표시됩니다.</p>
+									)}
 								</div>
-								{imageReviewEnabled ? (
-									<div className="flex w-full min-h-[200px] flex-1 flex-col lg:min-h-0">
-										<div className="flex shrink-0 flex-col gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
-											<Label htmlFor="extracted-text" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-												추출 텍스트 (편집)
-											</Label>
-											<div className="flex flex-wrap items-center gap-1">
-												<Button
-													type="button"
-													variant="ghost"
-													size="sm"
-													className="h-7 gap-1 px-2 text-xs text-primary hover:bg-primary/10"
-													disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-													onClick={(e) => {
-														e.stopPropagation();
-														void handleReExtract();
-													}}
-												>
-													<RefreshCw className={cn("size-3.5", ocrLoading && "animate-spin")} aria-hidden />
-													다시 추출
-												</Button>
-												<Button
-													type="button"
-													variant="ghost"
-													size="sm"
-													className="h-7 shrink-0 gap-1.5 px-2 text-xs text-cyan-700 hover:bg-cyan-500/10 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
-													disabled={!selected || ocrLoading}
-													onClick={(e) => {
-														e.stopPropagation();
-														void copyExtractedText();
-													}}
-												>
-													<Copy className="size-3.5" aria-hidden />
-													{copyFlash ? "복사됨" : "클립보드 복사"}
-												</Button>
-												<Button
-													type="button"
-													variant="ghost"
-													size="sm"
-													className="h-7 gap-1 px-2 text-xs text-violet-800 hover:bg-violet-500/10 hover:text-violet-900 dark:text-violet-300 dark:hover:text-violet-200"
-													disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-													onClick={(e) => {
-														e.stopPropagation();
-														applyExtractedToFinalAlt();
-													}}
-													title="추출 텍스트를 최종 ALT로 적용"
-												>
-													<ArrowRight className="size-3.5" aria-hidden />
-													최종 ALT로
-												</Button>
-											</div>
-										</div>
-										<textarea
-											id="extracted-text"
-											value={selected?.extractedText ?? ""}
-											onChange={(e) => {
-												const v = e.target.value;
-												updateSelectedText(v);
-											}}
-											disabled={!selected || ocrLoading || selected?.excludedFromTarget}
-											placeholder={!selected ? "이미지를 선택하세요." : selected?.excludedFromTarget ? "대상에서 제외된 이미지입니다. alt 주입·검수 대상에 포함되지 않습니다." : ocrLoading ? (ocrEngine === "google-vision" ? "Google Cloud Vision으로 텍스트 추출 중…" : ocrEngine === "ocr-space" ? "OCR.space로 텍스트 추출 중…" : "Tesseract OCR(로컬전용)로 텍스트 추출 중…") : "추출된 텍스트가 여기 표시됩니다. 필요하면 직접 수정할 수 있습니다."}
-											aria-busy={ocrLoading}
-											className="min-h-0 flex-1 resize-none border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
-											spellCheck={false}
-										/>
-									</div>
-								) : null}
+								<div className="flex min-h-0 flex-1 flex-col p-4">{selected ? <ImageViewerZoom key={selected.id} src={selected.url} alt={selected.name} /> : <p className="flex flex-1 items-center justify-center px-2 text-center text-sm text-muted-foreground">왼쪽에서 이미지·ZIP을 추가한 뒤, 목록에서 항목을 선택해 주세요.</p>}</div>
 							</div>
 							<div data-tutorial="final-alt" className="flex h-full w-full min-h-[200px] flex-col lg:min-h-0">
 								<div className="flex shrink-0 flex-col gap-2 border-b border-border/80 bg-muted/30 px-3 py-2">
@@ -1016,7 +721,7 @@ export function ImageReviewWorkspace() {
 											variant="ghost"
 											size="sm"
 											className="h-7 gap-1 px-2 text-xs text-sky-800 hover:bg-sky-500/10 hover:text-sky-900 dark:text-sky-300 dark:hover:text-sky-200"
-											disabled={!selected || ocrLoading || selected?.excludedFromTarget || htmlAssets.length === 0}
+											disabled={!selected || selected?.excludedFromTarget || htmlAssets.length === 0}
 											onClick={(e) => {
 												e.stopPropagation();
 												refreshFinalAltFromHtmlSource();
@@ -1031,7 +736,7 @@ export function ImageReviewWorkspace() {
 											variant="ghost"
 											size="sm"
 											className="h-7 gap-1 px-2 text-xs text-amber-800 hover:bg-amber-500/10 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-200"
-											disabled={!selected || ocrLoading || spellLoading || selected?.excludedFromTarget}
+											disabled={!selected || spellLoading || selected?.excludedFromTarget}
 											onClick={(e) => {
 												e.stopPropagation();
 												void handleSpellCheck();
@@ -1045,7 +750,7 @@ export function ImageReviewWorkspace() {
 											variant="ghost"
 											size="sm"
 											className="h-7 gap-1 px-2 text-xs text-red-800 hover:bg-red-500/10 hover:text-red-900 dark:text-red-300 dark:hover:text-red-200"
-											disabled={!selected || ocrLoading || spellLoading || selected?.excludedFromTarget || !spellPreviewActive || spellHits.length === 0}
+											disabled={!selected || spellLoading || selected?.excludedFromTarget || !spellPreviewActive || spellHits.length === 0}
 											onClick={(e) => {
 												e.stopPropagation();
 												handleSpellApply();
@@ -1067,21 +772,16 @@ export function ImageReviewWorkspace() {
 											setSpellBaseline(null);
 										}
 									}}
-									disabled={!selected || ocrLoading || selected?.excludedFromTarget}
+									disabled={!selected || selected?.excludedFromTarget}
 									placeholder={
 										!selected
 											? "이미지를 선택하세요."
 											: selected?.excludedFromTarget
 												? "대상에서 제외된 이미지입니다."
-												: !imageReviewEnabled
-													? htmlAssets.length === 0
-														? "검수 OFF: 최종 ALT를 직접 입력하세요. HTML·이미지 ZIP을 넣으면 매칭 alt가 여기 채워집니다."
-														: "HTML에 매칭된 img의 alt가 있으면 표시됩니다. 없으면 직접 입력하세요."
-													: htmlAssets.length === 0
-														? "HTML과 함께 ZIP을 넣으면 img alt가 있을 때 여기에 먼저 채워집니다. 승인 시 빈 alt에 주입됩니다."
-														: "HTML에 매칭된 img의 alt가 있으면 표시됩니다. 없으면 직접 입력하세요."
+												: htmlAssets.length === 0
+													? "최종 ALT를 직접 입력하세요. HTML·이미지 ZIP을 넣으면 매칭 alt가 여기 채워집니다."
+													: "HTML에 매칭된 img의 alt가 있으면 표시됩니다. 없으면 직접 입력하세요."
 									}
-									aria-busy={imageReviewEnabled && ocrLoading}
 									className="min-h-0 flex-1 resize-none border-0 bg-background/80 p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
 									spellCheck={false}
 								/>

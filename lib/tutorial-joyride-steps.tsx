@@ -8,7 +8,6 @@ export const TUTORIAL_JOYRIDE_STEP_IDS = {
 	finalAlt: "tutorial-final-alt",
 	reviewActions: "tutorial-review-actions",
 	progress: "tutorial-progress",
-	reviewModeToggle: "tutorial-review-toggle",
 	exportDeliverables: "tutorial-export",
 } as const;
 
@@ -80,15 +79,6 @@ export function getTutorialJoyrideSteps(): Step[] {
 			placement: "top",
 			skipBeacon: true,
 			scrollOffset: 100,
-		},
-		{
-			id: TUTORIAL_JOYRIDE_STEP_IDS.reviewModeToggle,
-			target: '[data-tutorial="image-review-toggle"]',
-			title: "Step 7. 검수 모드 설정",
-			content: demo("이미지 검수 없이 엑셀 산출물만 필요하다면 ON/OFF 스위치를 활용하세요."),
-			placement: "right",
-			skipBeacon: true,
-			scrollOffset: 120,
 		},
 		{
 			id: TUTORIAL_JOYRIDE_STEP_IDS.exportDeliverables,
